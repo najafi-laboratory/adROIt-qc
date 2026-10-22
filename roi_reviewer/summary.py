@@ -1870,7 +1870,6 @@ body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; color: #202124; ba
 .page {{ width: min(1600px, calc(100vw - 72px)); margin: 16px auto 26px; }}
 .head {{ display: flex; justify-content: space-between; gap: 14px; align-items: end; margin-bottom: 12px; }}
 h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
-.meta {{ color: #667085; font-size: 13px; text-align: right; }}
 .grid {{ display: grid; gap: 6px; }}
 .review-main {{ margin-top: 8px; display: grid; grid-template-columns: minmax(0, 1fr) clamp(270px, 22vw, 340px); gap: 8px; align-items: start; }}
 .review-main.menu-collapsed {{ grid-template-columns: minmax(0, 1fr) 38px; }}
@@ -2034,12 +2033,12 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .note {{ margin-top: 6px; color: #667085; font-size: 12px; }}
 .docs-link {{ display: inline-block; color: #175cd3; font-size: 13px; font-weight: 600; text-decoration: none; }}
 .docs-link:hover {{ text-decoration: underline; }}
-@media (max-width: 1100px) {{ .review-main, .review-main.menu-collapsed, .fov-row, .fov-review, .grid, .controls {{ grid-template-columns: 1fr; }} .side-menu, .review-main.menu-collapsed .side-menu {{ position: static; width: auto; max-height: none; overflow: visible; }} .review-main.menu-collapsed .side-menu-toggle {{ writing-mode: horizontal-tb; min-height: 0; }} .head {{ display: block; }} .meta {{ text-align: left; }} }}
+@media (max-width: 1100px) {{ .review-main, .review-main.menu-collapsed, .fov-row, .fov-review, .grid, .controls {{ grid-template-columns: 1fr; }} .side-menu, .review-main.menu-collapsed .side-menu {{ position: static; width: auto; max-height: none; overflow: visible; }} .review-main.menu-collapsed .side-menu-toggle {{ writing-mode: horizontal-tb; min-height: 0; }} .head {{ display: block; }} }}
 </style>
 </head>
 <body>
 <div class="page">
-  <div class="head"><h1>{session_name} preprocessing QC ({n_rois} ROIs)</h1><div class="meta" id="meta"></div></div>
+  <div class="head"><h1>{session_name} preprocessing QC ({n_rois} ROIs)</h1></div>
   <dialog id="morphologyDialog">
     <div class="dialog-header">
       <div class="dialog-title">ROI Metric Filters</div>
@@ -2494,7 +2493,6 @@ document.getElementById("green").src = data.green;
 const redImage = document.getElementById("red");
 if (redImage && data.redAvailable) redImage.src = data.red;
 document.querySelectorAll(".imagewrap img").forEach(img => img.addEventListener("load", syncControlColumnHeight));
-document.getElementById("meta").textContent = `${{data.nRois}} ROIs | ${{data.nFrames.toLocaleString()}} frames | ${{data.frameRate.toFixed(3)}} Hz${{data.redAvailable ? "" : " | no red channel detected"}}`;
 document.querySelectorAll(".overlay").forEach(svg => svg.setAttribute("viewBox", `0 0 ${{data.imageWidth}} ${{data.imageHeight}}`));
 function targetStructureLabel(name) {{
   if (name === "neuron") return "soma";
