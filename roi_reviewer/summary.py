@@ -2367,9 +2367,9 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div id="oasisThresholdInfo" class="info-box" hidden>
           <p>Inferred spikes are loaded as an ROI-by-frame amplitude array. The current pipeline can produce that array with Suite2p's OASIS deconvolution, but the viewer only requires the same array shape and semantics.</p>
           <p>The underlying values are inferred spike amplitudes, not spike probabilities. Larger values mean the inference method assigned a stronger spike-like transient at that frame.</p>
-          <p>The amplitude threshold is a viewer-side cutoff: frames with inferred spike amplitude above the selected threshold are drawn as red dots on the dF/F trace and are used for average-transient/tau summaries. The reset value is the threshold stored with the inferred-spike file or summary-generation stage.</p>
-          <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
-          <p><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
+          <p>The amplitude threshold is a viewer-side cutoff: frames with inferred spike amplitude above the selected threshold are drawn as red dots on the dF/F trace and are used for average-transient/tau summaries.</p>
+          <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
+          <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
         <div class="trace-loader" id="traceLoader" style="display:none;">
           <input id="dffFile" type="file" accept=".npy">
@@ -2708,11 +2708,21 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
       ? `Optional: load ROI x frame .npy files to replace the embedded dF/F or inferred spikes.`
       : `Optional: load an ROI x frame inferred-spikes .npy file to show spike overlays and fit metrics.`;
 }}
+// The Suite2p and OASIS links are shown only when the inferred-spike file says it came from them
+// (spikes.h5 attribute `method`, e.g. suite2p.extraction.dcnv.oasis). A replacement array loaded
+// with the button carries no such record, so the links are hidden for it.
+function updateSpikeSourceLinks() {{
+  const method = data.oasisStorageMode === "uploaded" ? "" : String((data.oasisAttrs || {{}}).method || "").toLowerCase();
+  document.getElementById("spikeDocsSuite2p").hidden = !method.includes("suite2p");
+  document.getElementById("spikeDocsOasis").hidden = !method.includes("oasis");
+}}
+updateSpikeSourceLinks();
 function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
   const parsed = parseNpy(arrayBuffer);
   oasisSpikes = parsed.array;
   data.oasisAvailable = true;
   data.oasisStorageMode = data.oasisStorageMode === "file" ? data.oasisStorageMode : "uploaded";
+  updateSpikeSourceLinks();
   if (parsed.shape.length >= 2) {{
     data.nRois = parsed.shape[0];
     data.nFrames = parsed.shape[1];
