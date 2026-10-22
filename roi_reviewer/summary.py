@@ -2365,7 +2365,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           </div>
         </div>
         <div id="oasisThresholdInfo" class="info-box" hidden>
-          <p>Inferred spikes are loaded as an ROI-by-frame amplitude array. The current pipeline can produce that array with Suite2p's OASIS deconvolution, but the viewer only requires the same array shape and semantics.</p>
+          <p>Inferred spikes are loaded as an ROI-by-frame amplitude array. <span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span> The viewer only requires that array shape and meaning, whatever produced it.</p>
           <p>The underlying values are inferred spike amplitudes, not spike probabilities. Larger values mean the inference method assigned a stronger spike-like transient at that frame.</p>
           <p>The amplitude threshold is a viewer-side cutoff: frames with inferred spike amplitude above the selected threshold are drawn as red dots on the dF/F trace and are used for average-transient/tau summaries.</p>
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
@@ -2712,9 +2712,18 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
 // (spikes.h5 attribute `method`, e.g. suite2p.extraction.dcnv.oasis). A replacement array loaded
 // with the button carries no such record, so the links are hidden for it.
 function updateSpikeSourceLinks() {{
-  const method = data.oasisStorageMode === "uploaded" ? "" : String((data.oasisAttrs || {{}}).method || "").toLowerCase();
-  document.getElementById("spikeDocsSuite2p").hidden = !method.includes("suite2p");
-  document.getElementById("spikeDocsOasis").hidden = !method.includes("oasis");
+  const uploaded = data.oasisStorageMode === "uploaded";
+  const recorded = uploaded ? "" : String((data.oasisAttrs || {{}}).method || "").trim();
+  const method = recorded.toLowerCase();
+  const viaSuite2p = method.includes("suite2p"), viaOasis = method.includes("oasis");
+  document.getElementById("spikeDocsSuite2p").hidden = !viaSuite2p;
+  document.getElementById("spikeDocsOasis").hidden = !viaOasis;
+  document.getElementById("spikeSourceText").textContent = uploaded
+    ? "This array was loaded with the Load inferred spikes file button, so its source is not recorded."
+    : viaSuite2p && viaOasis ? `This session's array was produced with Suite2p's OASIS deconvolution (recorded in the inferred-spike file as ${{recorded}}).`
+    : viaOasis ? `This session's array was produced with OASIS deconvolution (recorded in the inferred-spike file as ${{recorded}}).`
+    : recorded ? `The inferred-spike file records its method as ${{recorded}}.`
+    : "The inferred-spike file does not record which method produced it.";
 }}
 updateSpikeSourceLinks();
 function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
