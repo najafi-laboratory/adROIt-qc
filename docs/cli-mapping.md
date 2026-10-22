@@ -20,7 +20,7 @@ setting, its name on each route and where it appears in the interface.
 | `session_path` | positional argument | Everything: images, masks, traces and metrics are read from here |
 | `output_dir` | `--output-dir` | Where the HTML, PDF and sidecar arrays are written |
 | `input_layout` | `--input-layout` | Which files supply masks and traces; `auto` omits the flag |
-| `roi_index_label` | `--roi-index-label` | The selected-ROI header ("Original Index 48/225"), the labeler's "Selected ROI (Original Index)" field, and the first sort key |
+| `roi_index_label` | `--roi-index-label` | The selected-ROI header ("Original Index 48, sort position 49 of 225"), the labeler's "Selected ROI (Original Index)" field, and the first sort key |
 | `target_structure` | `--target-structure` | The **Target structure** menu at the top of **ROI Metric Filters**: the preset it opens on |
 | `initialize_labels_from_model_scores` | `--initialize-labels-from-roi-model-scores` | The labeler's starting counts (otherwise every ROI opens as not labeled) |
 | `custom_roi_metrics` | `--custom-roi-metrics` (once per file) | **Uploaded / Custom ROI Metrics** in the filter menu, the sort menu, and the metric spreadsheet |

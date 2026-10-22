@@ -2418,6 +2418,12 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             <span class="note">Keyboard: G/B/U/N label; left/right arrows select the previous/next visible ROI.</span>
             <strong>Manually label filtered ROIs</strong>
             <label>Selected ROI (<span class="roi-index-label">Suite2p Original Index</span>) <input id="roiInput" type="number" min="0" value="0"> <span id="selectedSortPosition" class="note"></span></label>
+            <button class="info-button" type="button" data-info-target="roiIndexHelp" aria-expanded="false">Read more</button>
+            <div id="roiIndexHelp" class="info-box" hidden>
+              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed identifier. It is 0-indexed, like every input and output file the Python generator reads and writes: ROI <em>k</em> is row <em>k</em> of <code>stat.npy</code>, <code>F.npy</code>, <code>Fneu.npy</code>, <code>iscell.npy</code>, <code>dff.h5</code>, <code>spikes.h5</code> and the <code>_dff.npy</code> / <code>_oasis_spikes.npy</code> sidecars, and row <em>k</em> of the exported <code>roi_manual_labels.npy</code>. The same number appears in the <code>suite2p_index</code> column of the exported metric CSV, and is what an index column means when you upload custom metrics or labels. With N ROIs it runs from 0 to N&nbsp;&minus;&nbsp;1, so the last of 225 ROIs is 224.</p>
+              <p>For masks from other segmentation software, the index is the ROI's row after the mask labels are sorted in ascending order, not the label value stored in the mask.</p>
+              <p><strong>Sort position</strong> counts from 1 within the ROIs currently shown, in the current sort order. It changes when you sort, filter or hide labels; the original index never does. Type an original index in the box to jump to that ROI.</p>
+            </div>
             <details class="roi-details">
               <summary id="roiDetailsSummary">Selected ROI Details</summary>
               <div id="readout"></div>
@@ -3451,9 +3457,11 @@ function roiFromSuite2pIndex(value) {{
   return Math.max(0, Math.min(data.nRois - 1, suite2pIndex));
 }}
 function currentSortPositionText() {{
-  const position = visibleRois.includes(selected) ? visibleRois.indexOf(selected) + 1 : 0;
+  // Sort position is 1-based within the ROIs currently shown; the original index (0-based) is shown separately.
   const total = visibleRois.length;
-  return `${{position}}/${{total}} by ${{sortMetricText()}} ${{appliedSortDirection}}`;
+  const order = `${{sortMetricText()}}, ${{appliedSortDirection}}`;
+  if (!visibleRois.includes(selected)) return `not in the current view (${{total}} shown, sorted by ${{order}})`;
+  return `sort position ${{visibleRois.indexOf(selected) + 1}} of ${{total}} (by ${{order}})`;
 }}
 function updateSortCurrent() {{
   document.getElementById("sortCurrent").textContent = `Current order: ${{sortMetricText()}}, ${{appliedSortDirection}}`;
@@ -3539,7 +3547,7 @@ function setSelected(roi) {{
   document.getElementById("roiInput").value = suite2pRoi;
   document.getElementById("roiDetailsSummary").textContent = "Selected ROI Details";
   document.getElementById("readout").textContent = `category ${{cellType}}${{roiModelText}} | area ${{fmt(dffMetrics.roi_area)}} px | skew ${{fmt(metrics.skew)}} connect ${{metrics.connect}} aspect ${{fmt(metrics.aspect)}} compact ${{fmt(metrics.compact)}} | SNR: 95/50 percentile ${{fmt(snr9550)}} | SNR: CaImAn (large-transient score) ${{fmt(postdocSnr)}} | inferred spike SNR ${{fmt(dffMetricValue(dffMetrics, "oasis_event_snr"))}} | rise tau ${{fmt(dffMetricValue(dffMetrics, "oasis_rise_tau_seconds"))}} s | decay tau ${{fmt(dffMetricValue(dffMetrics, "oasis_decay_tau_seconds"))}} s`;
-  document.getElementById("traceTitle").textContent = `Selected ROI - ${{ROI_INDEX_LABEL}} ${{suite2pRoi}}/${{data.nRois}}, Current Sort ${{currentSortPositionText()}}`;
+  document.getElementById("traceTitle").textContent = `Selected ROI - ${{ROI_INDEX_LABEL}} ${{suite2pRoi}}, ${{currentSortPositionText()}}`;
   document.querySelectorAll(".roi").forEach(c => c.classList.toggle("selected", Number(c.dataset.roi) === selected));
   updateLabelControls();
   updateSortCurrent();
@@ -4072,7 +4080,10 @@ function drawStack() {{
   const firstRow = Math.max(0, Math.floor(y0));
   const lastRow = Math.min(visibleRois.length - 1, Math.ceil(y1));
   const selectedPosition = visibleRois.includes(selected) ? visibleRois.indexOf(selected) + 1 : 0;
-  document.getElementById("stackTitle").textContent = `stacked raw dF/F, selected is ${{selectedPosition}}/${{visibleRois.length}} sorted by ${{sortMetricText()}} ${{appliedSortDirection}}`;
+  const selectedWhere = selectedPosition
+    ? `selected ROI at sort position ${{selectedPosition}} of ${{visibleRois.length}}`
+    : `selected ROI not in the current view`;
+  document.getElementById("stackTitle").textContent = `stacked raw dF/F, ${{selectedWhere}}, sorted by ${{sortMetricText()}} ${{appliedSortDirection}}`;
   const canvas = document.getElementById("stackCanvas"); fit(canvas); const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height, l = 62, r = 16, t = 14, b = 56, pw = w-l-r, ph = h-t-b;
   ctx.clearRect(0,0,w,h); ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,l,t,pw,ph,"time (s)","Current Sort Order");

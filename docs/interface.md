@@ -85,7 +85,10 @@ calls for.
 
 Good, bad, unsure and not labeled, by button or by single keystroke, with left and
 right arrows stepping through the visible ROIs in the current sort order. The header
-keeps a running count of each label.
+keeps a running count of each label. The selected ROI is identified by its original
+index, which is 0-based like every file the generator reads and writes (ROI *k* is row
+*k* of `F.npy`, the trace files and the exported labels), and its position in the
+current sort order is counted from 1, out of the ROIs currently shown.
 
 ### Visibility by label
 
