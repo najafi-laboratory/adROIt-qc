@@ -1838,7 +1838,7 @@ def _write_html(
         '</div>'
         '<div id="oasisDiagnosticsHelp" class="info-box" hidden>'
         '<p><strong>Average transient:</strong> dF/F windows around inferred spikes are baseline-subtracted and averaged for the selected ROI.</p>'
-        '<p><strong>Exponential model:</strong> a simple decay curve is drawn from the average transient peak using the empirical e-fold time, where the average transient falls to 1/e of its peak amplitude.</p>'
+        '<p><strong>Exponential model:</strong> a simple decay curve is drawn from the average transient peak using the empirical decay tau, the time the average transient takes to fall to 1/e of its peak amplitude.</p>'
         '<p><strong>Amplitude threshold:</strong> only inferred spike amplitudes above the selected threshold contribute to the average transient.</p>'
         '</div>'
         '<div class="oasis-diagnostics-body">'
@@ -2009,6 +2009,12 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .oasis-diagnostics.minimized {{ display: none; }}
 .oasis-diagnostics .note {{ margin-bottom: 6px; }}
 #oasisTransientCanvas {{ height: 220px; }}
+.fov-side {{ display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 600px; min-width: 0; }}
+.gbu-summary {{ width: 100%; }}
+.gbu-plot-title {{ font-size: 12px; font-weight: 600; color: #344054; margin: 8px 0 3px; }}
+#gbuFractionCanvas {{ height: 160px; }}
+#gbuTransientCanvas {{ height: 220px; }}
+#gbuRateCanvas {{ height: 190px; }}
 .oasis-panel {{ margin-top: 10px; }}
 .oasis-toggle {{ display: flex; gap: 6px; align-items: center; font-weight: 700; }}
 .oasis-toggle input {{ width: auto; }}
@@ -2341,12 +2347,34 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
   <div class="review-main">
     <div class="viewer-column">
       <div class="fov-row">
-        <div class="fov-review {fov_review_class} oasis-collapsed">
+        <div class="fov-review {fov_review_class}">
           <div class="grid {fov_grid_class}">
             <div class="panel"><div class="panel-title-row"><div class="title">{channel1_title}</div></div><div class="imagewrap"><img id="green"><svg class="overlay" preserveAspectRatio="xMidYMid meet"></svg></div></div>
             {red_panel}
           </div>
-          {oasis_diagnostics_panel}
+          <div class="fov-side">
+            <div class="panel gbu-summary">
+              <div class="oasis-diagnostics-header">
+                <div class="title">Summary of good/bad/unsure neurons</div>
+                <div class="oasis-diagnostics-actions"><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
+              </div>
+              <div id="gbuSummaryHelp" class="info-box" hidden>
+                <p>These plots group every ROI in the session by its current label and update as you label. ROIs that a metric filter labeled Bad are counted as Bad.</p>
+                <p><strong>Fraction of ROIs by label:</strong> the share of all ROIs in the session with each label (Good, Bad, Unsure and Not labeled), with the count above each bar.</p>
+                <p><strong>Average calcium transient by label:</strong> each ROI's average dF/F transient is computed as in the selected-ROI fit panel: inferred spikes above that ROI's default amplitude threshold, counted at least 0.25 s apart, each with a window from 0.5 s before to 2 s after the spike and the median of its own pre-spike part subtracted. The line is the mean of those per-ROI averages for each label and the band is the standard error of the mean across ROIs, so each ROI counts once however many spikes it has. ROIs with no spike above their threshold are left out.</p>
+                <p><strong>Firing rate by label:</strong> one dot per ROI, its number of inferred spikes above threshold (counted as above) divided by the analyzed recording time, in events per second. The box marks the median and quartiles and the whiskers the 5th and 95th percentiles; above 500 ROIs per label, an even subsample of the dots is drawn.</p>
+                <p>The two lower panels need dF/F and inferred spikes. They are computed once when both are loaded and then only regrouped as labels change; changing the amplitude threshold for the selected ROI does not change them.</p>
+              </div>
+              <div class="note" id="gbuSummaryNote"></div>
+              <div class="gbu-plot-title">Fraction of ROIs by label</div>
+              <canvas id="gbuFractionCanvas"></canvas>
+              <div class="gbu-plot-title">Average calcium transient by label (mean &plusmn; s.e.m. across ROIs)</div>
+              <canvas id="gbuTransientCanvas"></canvas>
+              <div class="gbu-plot-title">Firing rate by label</div>
+              <canvas id="gbuRateCanvas"></canvas>
+            </div>
+            {oasis_diagnostics_panel}
+          </div>
         </div>
       </div>
       <div class="panel">
@@ -2465,7 +2493,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
   </div>
   <div class="plots">
     <div class="panel">
-      <div class="title" id="stackTitle">dF/F, stacked ROIs</div>
+      <div class="title" id="stackTitle">Stacked dF/F</div>
       <div class="controls">
         <strong>Stacked trace range</strong>
         <label>First ROI <input id="yStart" type="number" min="0" value="0"></label>
@@ -2476,10 +2504,10 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="note">Wheel to zoom time.</div>
     </div>
     <div class="panel">
-      <div class="title">Motion correction drift per frame</div>
+      <div class="title">Motion correction shift per frame</div>
       <canvas id="motionDriftCanvas"></canvas>
-      <div class="note">Rigid x/y drift per frame from Suite2p motion correction. These plots follow the current trace time window.</div>
-      <div class="title" style="margin-top:8px;">Motion Correction pixel shift distributions</div>
+      <div class="note">Rigid x/y shift per frame from Suite2p motion correction. These plots follow the current trace time window.</div>
+      <div class="title" style="margin-top:8px;">Motion correction pixel shifts</div>
       <canvas id="motionDistributionCanvas"></canvas>
     </div>
   </div>
@@ -2619,6 +2647,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
     data.nFrames = parsed.shape[1];
   }}
   oasisDiagnosticsCache.clear();
+  invalidateGbuSummary();
   if (!silent) {{
     document.getElementById("traceLoadNote").textContent = `Loaded dF/F file with ${{data.nRois}} ROIs x ${{data.nFrames}} frames.`;
   }} else {{
@@ -2730,6 +2759,7 @@ function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
   const parsed = parseNpy(arrayBuffer);
   oasisSpikes = parsed.array;
   data.oasisAvailable = true;
+  setOasisDiagnosticsVisible(true);
   data.oasisStorageMode = data.oasisStorageMode === "file" ? data.oasisStorageMode : "uploaded";
   updateSpikeSourceLinks();
   if (parsed.shape.length >= 2) {{
@@ -2737,6 +2767,7 @@ function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
     data.nFrames = parsed.shape[1];
   }}
   oasisDiagnosticsCache.clear();
+  invalidateGbuSummary();
   document.getElementById("traceOasisControls").classList.add("visible");
   configureOasisThresholdControls();
   if (!silent) {{
@@ -3239,6 +3270,9 @@ function metricLabel(metric) {{
   if (metric === "original" || metric === "suite2p_index") return ROI_INDEX_LABEL_LOWER;
   return metric.replace("_", " ");
 }}
+function sortDirectionText(direction = appliedSortDirection) {{
+  return direction === "desc" ? "descending" : "ascending";
+}}
 function sortMetricText(metrics = appliedSortMetrics) {{
   if (!metrics.length) return metricLabel("original");
   if (metrics.length === 1) return metricLabel(metrics[0]);
@@ -3426,7 +3460,7 @@ function drawMetricHistogram(canvas) {{
   const yText = h - 7 * (window.devicePixelRatio || 1);
   ctx.fillStyle = "#475467"; ctx.font = `${{10 * (window.devicePixelRatio || 1)}}px Arial`;
   ctx.textAlign = "left"; ctx.fillText(fmt(lo), pad, yText);
-  ctx.textAlign = "center"; ctx.fillText(`bin ${{fmt(binSize)}}`, pad + plotW / 2, yText);
+  ctx.textAlign = "center"; ctx.fillText(`Bin ${{fmt(binSize)}}`, pad + plotW / 2, yText);
   ctx.textAlign = "right"; ctx.fillText(fmt(hi), pad + plotW, yText);
 }}
 function drawMetricHistograms() {{
@@ -3478,12 +3512,12 @@ function roiFromSuite2pIndex(value) {{
 function currentSortPositionText() {{
   // Sort position is 1-based within the ROIs currently shown; the original index (0-based) is shown separately.
   const total = visibleRois.length;
-  const order = `${{sortMetricText()}}, ${{appliedSortDirection}}`;
+  const order = `${{sortMetricText()}}, ${{sortDirectionText()}}`;
   if (!visibleRois.includes(selected)) return `not in the current view (${{total}} shown, sorted by ${{order}})`;
   return `sort position ${{visibleRois.indexOf(selected) + 1}} of ${{total}} (by ${{order}})`;
 }}
 function updateSortCurrent() {{
-  document.getElementById("sortCurrent").textContent = `Current order: ${{sortMetricText()}}, ${{appliedSortDirection}}`;
+  document.getElementById("sortCurrent").textContent = `Current order: ${{sortMetricText()}}, ${{sortDirectionText()}}`;
   document.getElementById("selectedSortPosition").textContent = currentSortPositionText();
 }}
 function syncStackInputs() {{
@@ -3636,6 +3670,7 @@ function updateLabelControls() {{
   let good = 0, bad = 0, unsure = 0, unlabeled = 0;
   for (const value of labels) {{ if (value === 1) good++; else if (value === 0) bad++; else if (value === 2) unsure++; else unlabeled++; }}
   document.getElementById("labelCounts").textContent = `${{good}} good | ${{bad}} bad | ${{unsure}} unsure | ${{unlabeled}} not labeled`;
+  scheduleGbuSummaryDraw();
 }}
 function labelName(label) {{
   if (label === 1) return "good";
@@ -4016,6 +4051,9 @@ function setupFovZoom() {{
 }}
 setupFovZoom();
 function drawAxes(ctx, w, h, l, t, pw, ph, xLabel, yLabel, options = {{}}) {{
+  // Axis labels start uppercase, except the dF/F notation.
+  const cap = s => (s && !/^dF/.test(s)) ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  xLabel = cap(xLabel); yLabel = cap(yLabel);
   ctx.strokeStyle = "#d0d5dd"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(l,t); ctx.lineTo(l,t+ph); ctx.lineTo(l+pw,t+ph); ctx.stroke();
   const xLabelY = options.xLabelY ?? h - 8;
   const yLabelX = options.yLabelX ?? 14;
@@ -4102,7 +4140,7 @@ function drawStack() {{
   const selectedWhere = selectedPosition
     ? `selected ROI at sort position ${{selectedPosition}} of ${{visibleRois.length}}`
     : `selected ROI not in the current view`;
-  document.getElementById("stackTitle").textContent = `stacked raw dF/F, ${{selectedWhere}}, sorted by ${{sortMetricText()}} ${{appliedSortDirection}}`;
+  document.getElementById("stackTitle").textContent = `Stacked raw dF/F, ${{selectedWhere}}, sorted by ${{sortMetricText()}}, ${{sortDirectionText()}}`;
   const canvas = document.getElementById("stackCanvas"); fit(canvas); const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height, l = 62, r = 16, t = 14, b = 56, pw = w-l-r, ph = h-t-b;
   ctx.clearRect(0,0,w,h); ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,l,t,pw,ph,"time (s)","Current Sort Order");
@@ -4242,7 +4280,7 @@ function drawMotionDrift() {{
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
   if (!motionX || !motionY) {{
     ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center";
-    ctx.fillText("Motion offsets not available for this session.", l + pw / 2, h / 2);
+    ctx.fillText("Motion shifts not available for this session.", l + pw / 2, h / 2);
     return;
   }}
   const n = Math.min(motionX.length, motionY.length, data.nFrames);
@@ -4332,7 +4370,7 @@ function drawMotionDistribution() {{
   const yValues = motionFiniteValues(motionY);
   if (!xValues.length || !yValues.length) {{
     ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center";
-    ctx.fillText("Motion offsets not available for this session.", l + pw / 2, t + ph / 2);
+    ctx.fillText("Motion shifts not available for this session.", l + pw / 2, t + ph / 2);
     return;
   }}
   const gap = 46 * (window.devicePixelRatio || 1);
@@ -4393,7 +4431,7 @@ function drawMotionDistribution() {{
     const yMax = Math.max(...histA, ...histB, 1e-9) * 1.12;
     const xOf = value => left + (value - lo) / (hi - lo) * width;
     const yOf = value => t + (1 - value / yMax) * ph;
-    drawPanelAxes(left, width, "shift (px)", "fraction / bin");
+    drawPanelAxes(left, width, "Shift (px)", "Fraction / bin");
     drawNumericTicks(ctx, left, t, width, ph, lo, hi, 0, yMax, 7, 4);
     ctx.fillStyle = "#475467"; ctx.font = `${{11 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center"; ctx.textBaseline = "top";
     ctx.fillText(title, left + width / 2, 5);
@@ -4417,7 +4455,7 @@ function drawMotionDistribution() {{
     const [lo, hi] = panelLimits(valuesA, valuesB, absolute);
     const xOf = value => left + (value - lo) / (hi - lo) * width;
     const yOf = value => t + (1 - value) * ph;
-    drawPanelAxes(left, width, "shift (px)", "cumulative fraction");
+    drawPanelAxes(left, width, "Shift (px)", "Cumulative fraction");
     drawNumericTicks(ctx, left, t, width, ph, lo, hi, 0, 1, 7, 4);
     ctx.fillStyle = "#475467"; ctx.font = `${{11 * (window.devicePixelRatio || 1)}}px Arial`;
     ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -4440,9 +4478,9 @@ function drawMotionDistribution() {{
     drawCdf(valuesA, "#2563eb", labelA, 24);
     drawCdf(valuesB, "#dc2626", labelB, 42);
   }}
-  drawHistogramPanel(l, panelW, "Offset distribution", xValues, yValues, "x shift", "y shift");
-  drawCdfPanel(l + panelW + gap, panelW, "Signed shift CDF", xValues, yValues, "x shift", "y shift", false);
-  drawCdfPanel(l + 2 * (panelW + gap), panelW, "Absolute shift CDF", absXValues, absYValues, "|x shift|", "|y shift|", true);
+  drawHistogramPanel(l, panelW, "Signed shift histogram", xValues, yValues, "X shift", "Y shift");
+  drawCdfPanel(l + panelW + gap, panelW, "Signed shift CDF", xValues, yValues, "X shift", "Y shift", false);
+  drawCdfPanel(l + 2 * (panelW + gap), panelW, "Absolute shift CDF", absXValues, absYValues, "|X shift|", "|Y shift|", true);
 }}
 function diagnosticMean(values) {{
   let sum = 0, n = 0;
@@ -4559,7 +4597,7 @@ function drawOasisDiagnostics() {{
     summary.textContent = `No inferred spikes pass amplitude threshold ${{fmt(oasisEventThreshold)}} for this ROI.`;
     return;
   }}
-  summary.textContent = `${{diagnostics.events.length}} inferred spikes at amplitude threshold ${{fmt(oasisEventThreshold)}} | empirical e-fold tau ${{fmt(diagnostics.tau)}} s`;
+  summary.textContent = `${{diagnostics.events.length}} inferred spikes at amplitude threshold ${{fmt(oasisEventThreshold)}} | empirical decay tau ${{fmt(diagnostics.tau)}} s`;
 
   let w = transientCanvas.width, h = transientCanvas.height, l = 64, r = 14, t = 34, b = 50, pw = w - l - r, ph = h - t - b;
   const finiteWave = diagnostics.waveform.filter(Number.isFinite);
@@ -4576,11 +4614,237 @@ function drawOasisDiagnostics() {{
   transientCtx.fillText("Average transient vs exponential decay model", l + 4, 5);
   drawLineSeries(transientCtx, diagnostics.times.map((time, i) => [time, diagnostics.waveform[i]]), xOf, yOf, "#1d4ed8", 1.6);
   drawLineSeries(transientCtx, diagnostics.times.map((time, i) => [time, diagnostics.expModel[i]]), xOf, yOf, "#dc2626", 1.4);
-  transientCtx.fillStyle = "#1d4ed8"; transientCtx.fillText("avg transient", l + 12, t - 18);
-  transientCtx.fillStyle = "#dc2626"; transientCtx.fillText(`exp tau=${{fmt(diagnostics.tau)}}s`, l + 12, t - 4);
+  transientCtx.fillStyle = "#1d4ed8"; transientCtx.fillText("Average transient", l + 12, t - 18);
+  transientCtx.fillStyle = "#dc2626"; transientCtx.fillText(`Exponential model, decay tau = ${{fmt(diagnostics.tau)}} s`, l + 12, t - 4);
+}}
+function setOasisDiagnosticsVisible(show) {{
+  const panel = document.querySelector(".oasis-diagnostics");
+  const button = document.getElementById("toggleOasisDiagnostics");
+  if (!panel) return;
+  panel.classList.toggle("minimized", !show);
+  if (button) button.textContent = show ? "Hide inferred spike fit metrics" : "Show inferred spike fit metrics";
+  requestAnimationFrame(draw);
+}}
+
+// ---- Summary of good/bad/unsure ROIs ----
+// Per-ROI average transients and firing rates are computed once, in slices so the page stays
+// responsive, whenever dF/F and inferred spikes are (re)loaded; label changes only regroup them.
+// `var` (not let/const) so label-change hooks that run during start-up never hit an uninitialized binding.
+var GBU_GROUPS = [
+  {{ code: 1, name: "Good", color: "#16a34a" }},
+  {{ code: 0, name: "Bad", color: "#dc2626" }},
+  {{ code: 2, name: "Unsure", color: "#d97706" }},
+];
+var GBU_UNLABELED = {{ code: -1, name: "Not labeled", color: "#667085" }};
+var gbuRoiStats = null;
+var gbuGeneration = 0;
+var gbuProgress = 0;
+var gbuDrawPending = false;
+function gbuDefaultThreshold(roi) {{
+  const value = dffMetric(roi, "oasis_optimal_threshold");
+  return Number.isFinite(Number(value)) ? Number(value) : Number(data.oasisEventThreshold ?? 0.05);
+}}
+function gbuRoiSummary(roi) {{
+  const threshold = gbuDefaultThreshold(roi);
+  const d = selectedOasisDiagnostics(roi, threshold);
+  if (roi !== selected) oasisDiagnosticsCache.delete(`${{roi}}:${{Number(threshold).toPrecision(8)}}`);
+  if (!d) return null;
+  const preFrames = Math.max(3, Math.round(data.frameRate * 0.5));
+  const postFrames = Math.max(6, Math.round(data.frameRate * 2.0));
+  const seconds = Math.max(1, data.nFrames - preFrames - postFrames) / data.frameRate;
+  const usable = d.events.length > 0 && d.waveform.length > 0 && d.waveform.every(Number.isFinite);
+  return {{ rate: d.events.length / seconds, waveform: usable ? Float32Array.from(d.waveform) : null, times: d.times }};
+}}
+function invalidateGbuSummary() {{ startGbuSummary(); }}
+function startGbuSummary() {{
+  const generation = ++gbuGeneration;
+  gbuRoiStats = null; gbuProgress = 0;
+  if (!data.oasisAvailable || !dff || !oasisSpikes) {{ scheduleGbuSummaryDraw(); return; }}
+  const stats = new Array(data.nRois).fill(null);
+  let roi = 0;
+  const step = () => {{
+    if (generation !== gbuGeneration) return;
+    const started = performance.now();
+    while (roi < data.nRois && performance.now() - started < 25) {{ stats[roi] = gbuRoiSummary(roi); roi += 1; }}
+    gbuProgress = roi / Math.max(1, data.nRois);
+    if (roi >= data.nRois) gbuRoiStats = stats;
+    scheduleGbuSummaryDraw();
+    if (roi < data.nRois) setTimeout(step, 0);
+  }};
+  setTimeout(step, 0);
+}}
+function scheduleGbuSummaryDraw() {{
+  if (gbuDrawPending) return;
+  gbuDrawPending = true;
+  requestAnimationFrame(() => {{ gbuDrawPending = false; drawGbuSummary(); }});
+}}
+function gbuPercentile(sorted, q) {{
+  if (!sorted.length) return NaN;
+  const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}}
+function gbuCanvas(id) {{
+  const canvas = document.getElementById(id);
+  if (!canvas) return null;
+  fit(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return {{ canvas, ctx, w: canvas.width, h: canvas.height, r: window.devicePixelRatio || 1 }};
+}}
+function gbuMessage(c, text) {{
+  c.ctx.fillStyle = "#475467"; c.ctx.font = `${{12 * c.r}}px Arial`; c.ctx.textAlign = "center"; c.ctx.textBaseline = "middle";
+  c.ctx.fillText(text, c.w / 2, c.h / 2);
+}}
+function gbuYTicks(ctx, l, t, ph, lo, hi, n, r, digits) {{
+  ctx.fillStyle = "#475467"; ctx.font = `${{10 * r}}px Arial`; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (let i = 0; i <= n; i++) {{
+    const v = lo + (hi - lo) * i / n;
+    ctx.fillText(v.toFixed(digits), l - 5 * r, t + (1 - i / n) * ph);
+  }}
+}}
+function drawGbuSummary() {{
+  const counts = new Map([[1, 0], [0, 0], [2, 0], [-1, 0]]);
+  for (const value of labels) {{
+    const key = value === 1 || value === 0 || value === 2 ? value : -1;
+    counts.set(key, counts.get(key) + 1);
+  }}
+  const total = Math.max(1, labels.length);
+  const f = gbuCanvas("gbuFractionCanvas");
+  if (f) {{
+    const groups = GBU_GROUPS.concat([GBU_UNLABELED]);
+    const l = 50 * f.r, rr = 10 * f.r, t = 20 * f.r, b = 24 * f.r, pw = f.w - l - rr, ph = f.h - t - b;
+    drawAxes(f.ctx, f.w, f.h, l, t, pw, ph, "", "Fraction of ROIs", {{ yLabelX: 12 * f.r }});
+    gbuYTicks(f.ctx, l, t, ph, 0, 1, 4, f.r, 2);
+    const slot = pw / groups.length;
+    groups.forEach((g, i) => {{
+      const n = counts.get(g.code), frac = n / total;
+      const bw = slot * 0.62, x = l + i * slot + (slot - bw) / 2, y = t + (1 - frac) * ph;
+      f.ctx.fillStyle = g.color; f.ctx.fillRect(x, y, bw, t + ph - y);
+      f.ctx.font = `${{11 * f.r}}px Arial`; f.ctx.textAlign = "center";
+      f.ctx.fillStyle = "#344054"; f.ctx.textBaseline = "bottom";
+      f.ctx.fillText(`${{(100 * frac).toFixed(0)}}% (n = ${{n}})`, x + bw / 2, y - 2 * f.r);
+      f.ctx.fillStyle = "#475467"; f.ctx.textBaseline = "top";
+      f.ctx.fillText(g.name, x + bw / 2, t + ph + 5 * f.r);
+    }});
+  }}
+  const note = document.getElementById("gbuSummaryNote");
+  const tc = gbuCanvas("gbuTransientCanvas");
+  const rc = gbuCanvas("gbuRateCanvas");
+  const spikesMissing = !data.oasisAvailable || !dff || !oasisSpikes;
+  const ready = Array.isArray(gbuRoiStats);
+  if (note) {{
+    note.textContent = spikesMissing
+      ? "The transient and firing-rate panels need dF/F and inferred spikes; load them to show those panels."
+      : ready ? `${{labels.length}} ROIs: ${{counts.get(1)}} good, ${{counts.get(0)}} bad, ${{counts.get(2)}} unsure, ${{counts.get(-1)}} not labeled.`
+      : `Computing per-ROI transients and firing rates: ${{Math.round(100 * gbuProgress)}}%`;
+  }}
+  if (!ready) {{
+    const message = spikesMissing ? "Needs dF/F and inferred spikes" : "Computing...";
+    if (tc) gbuMessage(tc, message);
+    if (rc) gbuMessage(rc, message);
+    return;
+  }}
+  if (tc) {{
+    const first = gbuRoiStats.find(s => s && s.waveform);
+    const times = first ? first.times : null;
+    const series = [];
+    let yMin = Infinity, yMax = -Infinity;
+    if (times) {{
+      for (const g of GBU_GROUPS) {{
+        const rows = [];
+        for (let roi = 0; roi < gbuRoiStats.length; roi++) {{
+          const s = gbuRoiStats[roi];
+          if (s && s.waveform && labels[roi] === g.code) rows.push(s.waveform);
+        }}
+        if (!rows.length) continue;
+        const mean = new Array(times.length), sem = new Array(times.length);
+        for (let i = 0; i < times.length; i++) {{
+          let sum = 0;
+          for (const row of rows) sum += row[i];
+          const m = sum / rows.length;
+          let ss = 0;
+          for (const row of rows) ss += (row[i] - m) * (row[i] - m);
+          mean[i] = m;
+          sem[i] = rows.length > 1 ? Math.sqrt(ss / (rows.length - 1)) / Math.sqrt(rows.length) : 0;
+          yMin = Math.min(yMin, m - sem[i]); yMax = Math.max(yMax, m + sem[i]);
+        }}
+        series.push({{ g, n: rows.length, mean, sem }});
+      }}
+    }}
+    if (!series.length) {{
+      gbuMessage(tc, "No labeled ROI has an inferred spike above its threshold");
+    }} else {{
+      const pad = (yMax - yMin) * 0.1 || 0.1; yMin -= pad; yMax += pad;
+      const l = 56 * tc.r, rr = 12 * tc.r, t = 10 * tc.r, b = 42 * tc.r, pw = tc.w - l - rr, ph = tc.h - t - b;
+      const xMin = times[0], xMax = times[times.length - 1];
+      const xOf = x => l + (x - xMin) / (xMax - xMin) * pw;
+      const yOf = y => t + (1 - (y - yMin) / (yMax - yMin)) * ph;
+      drawAxes(tc.ctx, tc.w, tc.h, l, t, pw, ph, "Time from inferred spike (s)", "dF/F", {{ xLabelY: tc.h - 6 * tc.r, yLabelX: 12 * tc.r }});
+      drawNumericTicks(tc.ctx, l, t, pw, ph, xMin, xMax, yMin, yMax, 6, 4);
+      series.forEach((s, k) => {{
+        tc.ctx.save();
+        tc.ctx.globalAlpha = 0.22; tc.ctx.fillStyle = s.g.color; tc.ctx.beginPath();
+        times.forEach((x, i) => {{ const px = xOf(x), py = yOf(s.mean[i] + s.sem[i]); if (i) tc.ctx.lineTo(px, py); else tc.ctx.moveTo(px, py); }});
+        for (let i = times.length - 1; i >= 0; i--) tc.ctx.lineTo(xOf(times[i]), yOf(s.mean[i] - s.sem[i]));
+        tc.ctx.closePath(); tc.ctx.fill();
+        tc.ctx.restore();
+        drawLineSeries(tc.ctx, times.map((x, i) => [x, s.mean[i]]), xOf, yOf, s.g.color, 1.6);
+        tc.ctx.fillStyle = s.g.color; tc.ctx.font = `${{11 * tc.r}}px Arial`; tc.ctx.textAlign = "right"; tc.ctx.textBaseline = "top";
+        tc.ctx.fillText(`${{s.g.name}} (n = ${{s.n}} ROI${{s.n === 1 ? "" : "s"}})`, l + pw - 4 * tc.r, t + 4 * tc.r + k * 14 * tc.r);
+      }});
+    }}
+  }}
+  if (rc) {{
+    const groups = [];
+    let hi = 0;
+    for (const g of GBU_GROUPS) {{
+      const values = [];
+      for (let roi = 0; roi < gbuRoiStats.length; roi++) {{
+        const s = gbuRoiStats[roi];
+        if (s && labels[roi] === g.code && Number.isFinite(s.rate)) values.push({{ roi, v: s.rate }});
+      }}
+      values.sort((a, b) => a.v - b.v);
+      if (values.length) hi = Math.max(hi, values[values.length - 1].v);
+      groups.push({{ g, values }});
+    }}
+    // round the axis top up to 1, 2, 2.5 or 5 x 10^k so the four ticks land on even values
+    if (hi > 0) {{
+      const raw = hi * 1.05 / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      hi = 4 * mag * [1, 2, 2.5, 5, 10].find(m => m * mag >= raw);
+    }} else hi = 1;
+    const l = 56 * rc.r, rr = 12 * rc.r, t = 10 * rc.r, b = 30 * rc.r, pw = rc.w - l - rr, ph = rc.h - t - b;
+    const yOf = v => t + (1 - v / hi) * ph;
+    drawAxes(rc.ctx, rc.w, rc.h, l, t, pw, ph, "", "Firing rate (events/s)", {{ yLabelX: 12 * rc.r }});
+    gbuYTicks(rc.ctx, l, t, ph, 0, hi, 4, rc.r, Math.max(0, Math.min(4, 1 - Math.floor(Math.log10(hi / 4)))));
+    const slot = pw / groups.length;
+    groups.forEach(({{ g, values }}, i) => {{
+      const cx = l + slot * (i + 0.5);
+      rc.ctx.fillStyle = "#475467"; rc.ctx.font = `${{11 * rc.r}}px Arial`; rc.ctx.textAlign = "center"; rc.ctx.textBaseline = "top";
+      rc.ctx.fillText(`${{g.name}} (n = ${{values.length}})`, cx, t + ph + 5 * rc.r);
+      if (!values.length) return;
+      const sorted = values.map(x => x.v);
+      const stride = Math.max(1, Math.ceil(values.length / 500));
+      rc.ctx.save();
+      rc.ctx.fillStyle = g.color; rc.ctx.globalAlpha = 0.45;
+      for (let k = 0; k < values.length; k += stride) {{
+        const jitter = (((values[k].roi * 2654435761) % 1000) / 1000 - 0.5) * slot * 0.5;
+        rc.ctx.beginPath(); rc.ctx.arc(cx + jitter, yOf(values[k].v), 1.8 * rc.r, 0, 2 * Math.PI); rc.ctx.fill();
+      }}
+      rc.ctx.restore();
+      const q = p => yOf(gbuPercentile(sorted, p)), bw = slot * 0.34;
+      rc.ctx.strokeStyle = "#101828"; rc.ctx.lineWidth = 1.2 * rc.r;
+      rc.ctx.strokeRect(cx - bw / 2, q(0.75), bw, q(0.25) - q(0.75));
+      rc.ctx.beginPath();
+      rc.ctx.moveTo(cx - bw / 2, q(0.5)); rc.ctx.lineTo(cx + bw / 2, q(0.5));
+      rc.ctx.moveTo(cx, q(0.75)); rc.ctx.lineTo(cx, q(0.95));
+      rc.ctx.moveTo(cx, q(0.25)); rc.ctx.lineTo(cx, q(0.05));
+      rc.ctx.stroke();
+    }});
+  }}
 }}
 function drawSelectedTraceAndOasis() {{ drawTrace(); drawOasisDiagnostics(); }}
-function draw() {{ drawSelectedTraceAndOasis(); drawStack(); drawMotionDrift(); drawMotionDistribution(); }}
+function draw() {{ drawSelectedTraceAndOasis(); drawStack(); drawMotionDrift(); drawMotionDistribution(); scheduleGbuSummaryDraw(); }}
 function reset() {{ x0=0; x1=data.nFrames-1; y0=0; y1=Math.min(19, visibleRois.length-1); document.getElementById("yStart").value=0; document.getElementById("yEnd").value=y1; syncTimeInputs(); draw(); }}
 function showAllVisibleTraces() {{
   y0 = 0;
@@ -5034,13 +5298,12 @@ const oasisDiagnosticsPanel = document.querySelector(".oasis-diagnostics");
 const toggleOasisDiagnostics = document.getElementById("toggleOasisDiagnostics");
 if (oasisDiagnosticsPanel && toggleOasisDiagnostics) {{
   toggleOasisDiagnostics.addEventListener("click", () => {{
-    const shouldShow = oasisDiagnosticsPanel.classList.contains("minimized");
-    oasisDiagnosticsPanel.classList.toggle("minimized", !shouldShow);
-    document.querySelector(".fov-review").classList.toggle("oasis-collapsed", !shouldShow);
-    toggleOasisDiagnostics.textContent = shouldShow ? "Hide inferred spike fit metrics" : "Show inferred spike fit metrics";
-    requestAnimationFrame(draw);
+    setOasisDiagnosticsVisible(oasisDiagnosticsPanel.classList.contains("minimized"));
   }});
 }}
+// Inferred-spike fit metrics are shown by default whenever spikes are available.
+if (data.oasisAvailable && oasisSpikes) setOasisDiagnosticsVisible(true);
+startGbuSummary();
 ["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax","roiAreaMin","roiAreaMax","eventSnrMin","andreaPostdocSnrMin","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","roiModelScoreProbabilityMin","roiModelScoreProbabilityMax"].forEach(id => {{
   const element = document.getElementById(id);
   if (!element) return;
