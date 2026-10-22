@@ -4773,7 +4773,9 @@ function drawGbuSummary() {{
       }}
     }}
     if (!series.length) {{
-      gbuMessage(tc, "No labeled ROI has an inferred spike above its threshold");
+      const anyLabeled = counts.get(1) + counts.get(0) + counts.get(2) > 0;
+      gbuMessage(tc, anyLabeled ? "No good, bad or unsure ROI has an inferred spike above its threshold"
+                                : "Label ROIs as good, bad or unsure to see their average transients");
     }} else {{
       const pad = (yMax - yMin) * 0.1 || 0.1; yMin -= pad; yMax += pad;
       const l = 56 * tc.r, rr = 12 * tc.r, t = 10 * tc.r, b = 42 * tc.r, pw = tc.w - l - rr, ph = tc.h - t - b;
@@ -4822,6 +4824,11 @@ function drawGbuSummary() {{
       const cx = l + slot * (i + 0.5);
       rc.ctx.fillStyle = "#475467"; rc.ctx.font = `${{11 * rc.r}}px Arial`; rc.ctx.textAlign = "center"; rc.ctx.textBaseline = "top";
       rc.ctx.fillText(`${{g.name}} (n = ${{values.length}})`, cx, t + ph + 5 * rc.r);
+      if (!counts.get(1) && !counts.get(0) && !counts.get(2) && i === 1) {{
+        rc.ctx.textBaseline = "middle";
+        rc.ctx.fillText("Label ROIs as good, bad or unsure to see their firing rates", l + pw / 2, t + ph / 2);
+        rc.ctx.textBaseline = "top";
+      }}
       if (!values.length) return;
       const sorted = values.map(x => x.v);
       const stride = Math.max(1, Math.ceil(values.length / 500));
