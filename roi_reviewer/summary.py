@@ -1717,6 +1717,7 @@ def _write_summary_pdf(
 def _write_html(
     output_path: Path,
     *,
+    input_layout_name: str = "suite2p",
     session_name: str,
     mean_green: np.ndarray,
     mean_red: np.ndarray | None,
@@ -1846,8 +1847,12 @@ def _write_html(
         '</div>'
         '</div>'
     )
+    # FOV titles name the imaging channel; Suite2p sessions also say which role it plays.
+    is_suite2p = input_layout_name == "suite2p"
+    channel1_title = f"Channel 1 mean{' (functional)' if is_suite2p else ''} ({n_rois} ROIs)"
+    channel2_title = f"Channel 2 mean{' (anatomical)' if is_suite2p else ''}"
     red_panel = (
-        '<div class="panel"><div class="panel-title-row"><div class="title">Anatomical mean</div>'
+        '<div class="panel"><div class="panel-title-row"><div class="title">' + channel2_title + '</div>'
         '<label class="overlay-mode-control">Overlay'
         '<select id="redOverlayMode">'
         '<option value="functional" selected>Suite2p ROIs</option>'
@@ -1863,7 +1868,7 @@ def _write_html(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{session_name} preprocessing QC ({n_rois} ROIs)</title>
+<title>{session_name} preprocessing QC</title>
 <style>
 html, body {{ overflow-y: auto; }}
 body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; color: #202124; background: #f6f7f8; }}
@@ -2038,7 +2043,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 </head>
 <body>
 <div class="page">
-  <div class="head"><h1>{session_name} preprocessing QC ({n_rois} ROIs)</h1></div>
+  <div class="head"><h1>{session_name} preprocessing QC</h1></div>
   <dialog id="morphologyDialog">
     <div class="dialog-header">
       <div class="dialog-title">ROI Metric Filters</div>
@@ -2338,7 +2343,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="fov-row">
         <div class="fov-review {fov_review_class} oasis-collapsed">
           <div class="grid {fov_grid_class}">
-            <div class="panel"><div class="panel-title-row"><div class="title">Functional mean</div></div><div class="imagewrap"><img id="green"><svg class="overlay" preserveAspectRatio="xMidYMid meet"></svg></div></div>
+            <div class="panel"><div class="panel-title-row"><div class="title">{channel1_title}</div></div><div class="imagewrap"><img id="green"><svg class="overlay" preserveAspectRatio="xMidYMid meet"></svg></div></div>
             {red_panel}
           </div>
           {oasis_diagnostics_panel}
@@ -5209,6 +5214,7 @@ def create_preprocessing_summary(
     )
     _write_html(
         html_path,
+        input_layout_name=resolved_layout.name,
         session_name=session_dir.name,
         mean_green=mean_green,
         mean_red=mean_red,
