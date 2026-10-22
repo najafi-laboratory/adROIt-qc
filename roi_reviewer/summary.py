@@ -2620,6 +2620,10 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
   }}
   draw();
 }}
+// Sidecars load by fetch() relative to this page, which browsers allow over http(s) but not
+// for a page opened from disk (file://). The notes below say which case applies.
+const openedFromDisk = window.location.protocol === "file:";
+const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Select the .npy file(s) with the buttons above, or open this page through a web address instead (a Globus HTTPS link, Open OnDemand, or python -m http.server run in this folder), where they load automatically.";
 function updateSidecarLoadNote() {{
   const note = document.getElementById("traceLoadNote");
   const parts = [];
@@ -2630,7 +2634,12 @@ function updateSidecarLoadNote() {{
     parts.push(oasisSpikes ? `inferred spikes loaded (${{data.oasisSidecarName}})` : `inferred spikes not loaded (${{data.oasisSidecarName || "sidecar .npy"}})`);
   }}
   if (parts.length) {{
-    note.textContent = `${{parts.join("; ")}}. If auto-loading is blocked, use the buttons above to select the matching .npy file(s).`;
+    const missing = (data.dffStorageMode === "file" && !dff)
+      || (data.oasisAvailable && data.oasisStorageMode === "file" && !oasisSpikes);
+    const advice = !missing ? ""
+      : openedFromDisk ? ` ${{SIDECAR_DISK_ADVICE}}`
+      : ` They were not found beside this page: check that the file(s) are in the same folder under the names shown, or select them with the buttons above.`;
+    note.textContent = `${{parts.join("; ")}}.${{advice}}`;
   }}
 }}
 function renderAutoLoadedFileList() {{
@@ -2686,7 +2695,9 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
   loader.style.display = "";
   const usesSidecars = data.dffStorageMode === "file" || data.oasisStorageMode === "file";
   note.textContent = usesSidecars
-    ? `This session uses sidecar .npy files for large arrays. Trying to load them from this folder.`
+    ? (openedFromDisk
+        ? `This session keeps its large arrays in .npy files beside this HTML. ${{SIDECAR_DISK_ADVICE}}`
+        : `This session keeps its large arrays in .npy files beside this HTML. Loading them from this folder.`)
     : data.oasisAvailable
       ? `Optional: load ROI x frame .npy files to replace the embedded dF/F or inferred spikes.`
       : `Optional: load an ROI x frame inferred-spikes .npy file to show spike overlays and fit metrics.`;

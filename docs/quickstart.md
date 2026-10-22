@@ -71,9 +71,24 @@ Open `outputs/my_session/<name>_interactive_fov_roi_dff.html` in any browser.
     For a large session the dF/F and inferred-spike arrays are written beside the HTML
     as `<name>_dff.npy` and `<name>_oasis_spikes.npy`. Move or email the whole
     directory, not the HTML alone. If the arrays are missing, the reviewer still opens
-    and the trace panels report that they are not loaded; the `Load dF/F file` and
-    `Load inferred spikes file` buttons let you select them by hand.
+    and the trace panels report that they are not loaded.
 
-    Browsers refuse to read a sibling file over a `file://` URL, so the arrays do not
-    auto-load when the HTML is opened directly from disk. Use those two buttons, or
-    serve the directory over HTTP (`python -m http.server` from inside it).
+### Whether the sidecars load automatically
+
+That depends on how the page is opened, not on the reviewer:
+
+| How you open the HTML | Address starts with | Sidecars |
+|:---|:---|:---|
+| Through a web address: a Globus collection with HTTPS access, Open OnDemand, or `python -m http.server` run in the folder | `https://` or `http://` | Load automatically, as long as they sit in the same folder as the HTML |
+| By double-clicking it, or from any downloaded, copied or mounted folder | `file://` | Not loaded. Browsers do not let a page opened from disk read files beside it, so select them with **Load dF/F file** and **Load inferred spikes file** |
+
+To serve a folder on your own machine, so both arrays load by themselves:
+
+```bash
+cd outputs/my_session
+python -m http.server 8000
+# then open http://localhost:8000/<name>_interactive_fov_roi_dff.html
+```
+
+The note under the two load buttons says which case applies. Sessions small enough to
+embed their arrays have no sidecars and open the same way from anywhere.

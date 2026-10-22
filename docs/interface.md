@@ -23,7 +23,9 @@ for which ROI set to draw. Selecting an outline updates every linked panel.
 
 The dF/F trace for the selected ROI, with inferred spikes drawn over it. The amplitude
 threshold is adjustable per ROI, and `Reset to ROI default` returns it to the value the
-generator computed. The two load buttons are the manual path for the sidecar arrays.
+generator computed. The two load buttons are the manual path for the sidecar arrays, needed when the page
+is opened from disk (`file://`), where browsers block the automatic load
+([why](quickstart.md#whether-the-sidecars-load-automatically)).
 Wheel or drag to zoom and pan in time; the window applies to the motion panel as well.
 
 ## Inferred-spike diagnostics

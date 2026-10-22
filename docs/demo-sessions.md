@@ -32,11 +32,16 @@ interface before building anything yourself.
 | Cerebellar dendrite, 2,702 ROIs | Classifier scores; set **ROI model score probability min** to 0.8 and press **Apply Filters** to keep 279 | [https://sandbox.zenodo.org/records/620873](https://sandbox.zenodo.org/records/620873) |
 
 1. Download the three files from a record into one folder.
-2. Open the `.html` file in a browser.
-3. Click **Load dF/F file** and choose the `_dff.npy` file, then **Load inferred spikes
-   file** and choose the `_oasis_spikes.npy` file. Or run `python -m http.server` in the
-   folder and open the page through `http://localhost:8000/`, which loads both
-   automatically.
+2. Open the reviewer in one of two ways:
+    * **Served, so both arrays load automatically.** Run `python -m http.server 8000` in
+      that folder and open `http://localhost:8000/<name>_interactive_fov_roi_dff.html`.
+    * **From disk.** Double-click the `.html` file, then click **Load dF/F file** and
+      choose the `_dff.npy` file, and **Load inferred spikes file** and choose the
+      `_oasis_spikes.npy` file. A page opened from disk is not allowed to read the files
+      beside it, so they have to be selected by hand.
+
+[Whether the sidecars load automatically](quickstart.md#whether-the-sidecars-load-automatically)
+explains the difference.
 
 !!! note "Sandbox records"
     These are test records on the Zenodo sandbox. They will move to zenodo.org, with
@@ -74,6 +79,7 @@ rather than copied.
 
 The two demos differ in how the trace arrays are stored, which is deliberate. Below the
 embedding threshold the arrays go inside the HTML and the file is self-contained on its
-own. Above it they are written beside the HTML as `.npy` sidecars, which the browser
-reads on demand. The PPC session, at 225 ROIs over 107,135 frames, lands in sidecar
+own. Above it they are written beside the HTML as `.npy` sidecars, which the page reads in
+full when it opens if it is served over a web address, and which you select with the load
+buttons if it is opened from disk. The PPC session, at 225 ROIs over 107,135 frames, lands in sidecar
 mode, so it also serves as the example of that path.

@@ -46,7 +46,9 @@ outputs/my_session/
 
 For sessions above the embedding threshold the trace arrays are written beside the
 HTML as sidecars rather than embedded in it. The HTML and its sidecars must travel
-together.
+together. They load automatically when the page is opened through a web address, and
+are selected with the two load buttons when it is opened from disk; see
+[Whether the sidecars load automatically](quickstart.md#whether-the-sidecars-load-automatically).
 
 ## Where to start
 
