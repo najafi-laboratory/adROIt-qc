@@ -888,7 +888,7 @@ def _add_custom_metric_column(
     while key in existing:
         key = f"{base_key}_{suffix}"
         suffix += 1
-    payload["definitions"].append({"key": key, "label": str(name), "source": source})
+    payload["definitions"].append({"key": key, "label": str(name), "source": source, "origin": "command line"})
     for roi, value in enumerate(metric_values):
         payload["values"][roi][key] = value
 
@@ -2082,7 +2082,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><strong>Reference values beside each field are computed from the ROIs embedded in this HTML.</strong> They describe this session's distribution so a candidate cut can be judged against it; they are not recommended thresholds.</p>
         <p><strong>Connectivity:</strong> the reference value is the 75th percentile of connectivity values.</p>
         <p><strong>ROI area:</strong> the reference values are the 25th and 75th percentiles across ROIs.</p>
-        <p><strong>Categorical ROI variables:</strong> no numeric reference value is shown; choose one or more loaded categories by label/value.</p>
+        <p><strong>Cell identity labels:</strong> no numeric reference value is shown; choose one or more loaded cell identities by label/value.</p>
         <p><strong>SNR: 95/50 percentile:</strong> the reference value is the mean SNR across ROIs.</p>
         <p><strong>SNR: CaImAn:</strong> the reference value is the mean large-transient score across ROIs.</p>
         <p><strong>Inferred spike metrics:</strong> the SNR reference value is the mean, and the rise and decay tau reference values are the 25th and 75th percentiles.</p>
@@ -2103,14 +2103,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="roi_area" data-min="roiAreaMin" data-max="roiAreaMax" aria-label="ROI area distribution"></canvas></details>
       </div>
       <div class="filter-subsection-title source-heading">
-        <span>Categorical ROI Variables</span>
+        <span>Cell Identity Labels</span>
         <button class="info-button" type="button" data-info-target="cellTypeMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="cellTypeMetricSources" class="info-box" hidden>
-        <p>Categorical ROI variables can be loaded from pipeline outputs or uploaded as a table. Use columns <code>category_code</code> and <code>category_label</code>, or legacy columns <code>cell_type_code</code> and <code>cell_type_label</code>. Optional <code>suite2p_index</code>, <code>roi</code>, or <code>index</code> maps rows by original ROI index.</p>
+        <p>Cell identity labels can be loaded from pipeline outputs or uploaded as a table. Use columns <code>category_code</code> and <code>category_label</code>, or legacy columns <code>cell_type_code</code> and <code>cell_type_label</code>. Optional <code>suite2p_index</code>, <code>roi</code>, or <code>index</code> maps rows by original ROI index.</p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
-        <span class="note">No categorical ROI variable loaded.</span>
+        <span class="note">No cell identity labels loaded.</span>
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Model Derived Metrics</span>
@@ -2211,7 +2211,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a>: Suite2p-provided fields include ROI shape metrics, detection/template fields, and trace activity fields.</p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L76-L91" target="_blank" rel="noopener noreferrer">Connectivity calculation code</a>: number of 4-connected components in each ROI pixel mask.</p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L390-L397" target="_blank" rel="noopener noreferrer">ROI area calculation code</a>: number of pixels in the Suite2p ROI mask field <code>xpix</code>.</p>
-      <p>Categorical variable code comes from loaded anatomical-channel label outputs or an uploaded table. Legacy cell-type files use <code>-1</code> excitatory/non-red, <code>0</code> unsure, and <code>1</code> inhibitory/red; other uploaded categorical variables may use any numeric codes with labels supplied by the file.</p>
+      <p>Cell identity code comes from loaded anatomical-channel label outputs or an uploaded table. Legacy cell-type files use <code>-1</code> excitatory/non-red, <code>0</code> unsure, and <code>1</code> inhibitory/red; other uploaded categorical variables may use any numeric codes with labels supplied by the file.</p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L122-L158" target="_blank" rel="noopener noreferrer">SNR: 95/50 percentile calculation code</a></p>
       <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a></p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L470-L556" target="_blank" rel="noopener noreferrer">Inferred spike metric calculation code</a>: metrics are calculated from thresholded inferred-spike amplitude windows.</p>
@@ -2227,8 +2227,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <label><input type="checkbox" name="sortMetric" value="compact"> Compactness</label>
           <label><input type="checkbox" name="sortMetric" value="roi_area"> ROI area (px)</label>
           <label><input type="checkbox" name="sortMetric" value="connectivity"> Connectivity</label>
-          <div class="sort-metric-group">Categorical ROI Variables</div>
-          <label><input type="checkbox" name="sortMetric" value="cell_type_code"> Categorical variable code</label>
+          <div class="sort-metric-group">Cell Identity Labels</div>
+          <label><input type="checkbox" name="sortMetric" value="cell_type_code"> Cell identity code</label>
           <div class="sort-metric-group">Fluorescence Trace Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="skew"> Skew</label>
           <label><input type="checkbox" name="sortMetric" value="snr_95_50"> SNR: 95/50 percentile</label>
@@ -2312,32 +2312,31 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
   </dialog>
   <dialog id="customRoiUploadDialog">
     <div class="dialog-header">
-      <div class="dialog-title">Upload Custom ROI Metric or Label</div>
+      <div class="dialog-title">Upload Custom ROI Metrics/Cell Identity Labels</div>
       <button id="closeCustomRoiUploadDialogTop" class="dialog-close" type="button" aria-label="Close">&times;</button>
     </div>
     <div class="dialog-section">
-      <div class="dialog-section-title">Automatically Loaded / Embedded Files</div>
+      <div class="dialog-section-title">Currently Loaded Metric &amp; Label Files</div>
       <ul id="autoLoadedFileList" class="auto-file-list"></ul>
     </div>
     <div class="dialog-section">
       <div class="dialog-section-title">Upload File</div>
       <div class="custom-upload-type">
-        <label><input type="radio" name="customUploadKind" value="numeric" checked> Numerical metric</label>
-        <label><input type="radio" name="customUploadKind" value="categorical"> Categorical label</label>
+        <label><input type="radio" name="customUploadKind" value="numeric" checked> QC metric</label>
+        <label><input type="radio" name="customUploadKind" value="categorical"> Cell identity label</label>
       </div>
       <input id="customRoiUploadFile" type="file" accept=".csv,.tsv,.txt,.json">
       <button id="applyCustomRoiUpload" type="button">Load selected file</button>
       <div id="customRoiUploadStatus" class="note"></div>
       <div class="info-box">
-        <p><strong>Numerical metric:</strong> CSV/TSV columns other than optional <code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code>, or <code>index</code> become sortable/filterable metrics. JSON may be an object of metric arrays or row objects.</p>
-        <p><strong>Categorical label:</strong> use <code>category_code</code>/<code>category_label</code>, or legacy <code>cell_type_code</code>/<code>cell_type_label</code>. If labels are missing, edit them below after loading.</p>
+        <p><strong>QC metric:</strong> custom per-ROI quality-control values to filter and sort by. Use a table with <strong>one row per ROI</strong> and <strong>one column per metric</strong>, with a header row whose names become the metric names; values must be numbers (leave blank or use NaN where missing). Row <em>k</em> is ROI <em>k</em> in original-index order, so a session with N ROIs needs N rows, unless the table has an index column (<code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code> or <code>index</code>), which gives each row's original ROI index instead. Formats: CSV, TSV or TXT, or JSON as an object of metric arrays (<code>{{"metric_name": [N values]}}</code>) or a list of row objects.</p>
+        <p><strong>Cell identity label:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon). One row per ROI, matched to ROIs as for QC metrics, with an integer <code>category_code</code> column and/or a <code>category_label</code> name column (legacy <code>cell_type_code</code>/<code>cell_type_label</code> columns also work). Names can be edited below after loading.</p>
         <p>Each file must provide one value per original ROI, or use a Suite2p index column to map rows to the original ROI indices. The viewer reports an error if the row/value count cannot match the ROI count.</p>
-        <p>Suggested location: keep upload files in the same folder as this HTML and its sidecar files. Browsers do not allow a page to force the file picker to open in a specific folder.</p>
       </div>
     </div>
     <div class="dialog-section" id="categoryLabelEditorSection" hidden>
-      <div class="dialog-section-title">Categorical Value Labels</div>
-      <div class="note">Edit labels for each unique categorical value. These labels are used in the filter menu, sort readouts, and spreadsheet export.</div>
+      <div class="dialog-section-title">Cell identity labels</div>
+      <div class="note">Edit the name for each unique cell identity value. These labels are used in the filter menu, sort readouts, and spreadsheet export.</div>
       <div id="categoryLabelEditor" class="category-label-editor"></div>
     </div>
     <div class="dialog-actions">
@@ -2356,15 +2355,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             <div class="panel gbu-summary">
               <div class="oasis-diagnostics-header">
                 <div class="title">Summary of good/bad/unsure neurons</div>
-                <div class="oasis-diagnostics-actions"><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
+                <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" aria-expanded="true" aria-controls="gbuSummaryBody">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
               </div>
               <div id="gbuSummaryHelp" class="info-box" hidden>
                 <p>These plots group every ROI in the session by its current label and update as you label. ROIs that a metric filter labeled Bad are counted as Bad.</p>
                 <p><strong>Fraction of ROIs by label:</strong> the share of all ROIs in the session with each label (Good, Bad, Unsure and Not labeled), with the count above each bar.</p>
-                <p><strong>Average calcium transient by label:</strong> each ROI's average dF/F transient is computed as in the selected-ROI fit panel: inferred spikes above that ROI's default amplitude threshold, counted at least 0.25 s apart, each with a window from 0.5 s before to 2 s after the spike and the median of its own pre-spike part subtracted. The line is the mean of those per-ROI averages for each label and the band is the standard error of the mean across ROIs, so each ROI counts once however many spikes it has. ROIs with no spike above their threshold are left out.</p>
+                <p><strong>Average calcium transient by label:</strong> each ROI's average dF/F transient is computed as in the selected-ROI fit panel: inferred spikes above that ROI's default amplitude threshold, counted at least 0.25 s apart, each with a window from 0.5 s before to 2 s after the spike and the median of its own pre-spike part subtracted. The line is the mean of those per-ROI averages for each label and the band is the standard error of the mean across ROIs, so each ROI counts once however many spikes it has. Event windows whose baseline-subtracted dF/F exceeds 20 in magnitude are left out of the average, as in the multi-session QC summary: values that large come from near-zero baselines rather than calcium signals, and a few of them would otherwise set the scale for the whole label. Those events still count toward the firing rate. ROIs with no spike above their threshold, or with every window left out, have no transient; the note above the plots gives the counts.</p>
                 <p><strong>Firing rate by label:</strong> one dot per ROI, its number of inferred spikes above threshold (counted as above) divided by the analyzed recording time, in events per second. The box marks the median and quartiles and the whiskers the 5th and 95th percentiles; above 500 ROIs per label, an even subsample of the dots is drawn.</p>
                 <p>The two lower panels need dF/F and inferred spikes. They are computed once when both are loaded and then only regrouped as labels change; changing the amplitude threshold for the selected ROI does not change them.</p>
               </div>
+              <div id="gbuSummaryBody">
               <div class="note" id="gbuSummaryNote"></div>
               <div class="gbu-plot-title">Fraction of ROIs by label</div>
               <canvas id="gbuFractionCanvas"></canvas>
@@ -2372,6 +2372,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
               <canvas id="gbuTransientCanvas"></canvas>
               <div class="gbu-plot-title">Firing rate by label</div>
               <canvas id="gbuRateCanvas"></canvas>
+              </div>
             </div>
             {oasis_diagnostics_panel}
           </div>
@@ -2419,9 +2420,9 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <button id="toggleSideMenu" class="side-menu-toggle" type="button" aria-expanded="true">Hide menu</button>
       <div class="control-column">
           <details class="panel label-controls menu-card" open>
-            <summary>Upload ROI Variables</summary>
+            <summary>Upload (optional)</summary>
             <div class="menu-card-content">
-              <button id="openCustomRoiUploadDialog" type="button">Upload Custom ROI Metric or Label</button>
+              <button id="openCustomRoiUploadDialog" type="button">Upload Custom ROI Metrics/Cell Identity Labels</button>
             </div>
           </details>
           <details class="panel morphology-card menu-card" open>
@@ -2678,24 +2679,21 @@ function updateSidecarLoadNote() {{
   }}
 }}
 function renderAutoLoadedFileList() {{
+  // Lists only ROI metric and cell identity files given on the command line (--custom-roi-metrics)
+  // or uploaded through this menu; traces, spikes and automatically detected session files are not listed.
   const list = document.getElementById("autoLoadedFileList");
   if (!list) return;
   const items = [];
-  if (data.dffStorageMode === "embedded") items.push("dF/F traces embedded in HTML");
-  if (data.dffStorageMode === "file" && data.dffSidecarName) items.push(`dF/F sidecar: ${{data.dffSidecarName}}`);
-  if (data.oasisAvailable) {{
-    if (data.oasisStorageMode === "embedded") items.push("inferred spikes embedded in HTML");
-    else if (data.oasisSidecarName) items.push(`inferred-spikes sidecar: ${{data.oasisSidecarName}}`);
-  }}
-  if (data.roiModelScoreSource && !String(data.roiModelScoreSource).startsWith("No ")) items.push(`ROI model scores: ${{data.roiModelScoreSource}}`);
-  if (data.cellTypeLabelSource && !["not loaded", "none"].includes(String(data.cellTypeLabelSource).toLowerCase())) items.push(`categorical ROI labels: ${{data.cellTypeLabelSource}}`);
+  const originText = origin => origin === "upload" ? "uploaded in this menu" : "command line (--custom-roi-metrics)";
   for (const definition of customMetricDefinitions()) {{
-    if (definition.source) items.push(`custom metric ${{definition.label}}: ${{definition.source}}`);
+    if (!definition.origin) continue;
+    items.push(`Custom ROI metric "${{definition.label}}": ${{definition.source || "unnamed file"}} (${{originText(definition.origin)}})`);
   }}
+  if (data.cellTypeLabelOrigin === "upload" && data.cellTypeLabelSource) items.push(`Cell identity labels: ${{data.cellTypeLabelSource}} (${{originText("upload")}})`);
   list.textContent = "";
   if (!items.length) {{
     const item = document.createElement("li");
-    item.textContent = "No optional ROI metric/label files are embedded or auto-loaded.";
+    item.textContent = "None yet. Custom ROI metrics given with --custom-roi-metrics and files uploaded here are listed.";
     list.appendChild(item);
     return;
   }}
@@ -2791,13 +2789,13 @@ function updateCategoricalFilterOptions() {{
   if (!values.length) {{
     const note = document.createElement("span");
     note.className = "note";
-    note.textContent = "No categorical ROI variable loaded.";
+    note.textContent = "No cell identity labels loaded.";
     container.appendChild(note);
     return;
   }}
   const note = document.createElement("span");
   note.className = "note";
-  note.textContent = "If no categories are checked, the categorical filter is not used.";
+  note.textContent = "If no cell identities are checked, the cell identity filter is not used.";
   container.appendChild(note);
   for (const value of values) {{
     const label = document.createElement("label");
@@ -2844,9 +2842,9 @@ function renderCategoryLabelEditor() {{
     span.textContent = `Value ${{value}}`;
     const input = document.createElement("input");
     input.type = "text";
-    input.value = data.categoryLabelMap?.[String(value)] || `category ${{value}}`;
+    input.value = data.categoryLabelMap?.[String(value)] || `cell identity ${{value}}`;
     input.addEventListener("change", () => {{
-      data.categoryLabelMap[String(value)] = input.value.trim() || `category ${{value}}`;
+      data.categoryLabelMap[String(value)] = input.value.trim() || `cell identity ${{value}}`;
       updateCategoricalFilterOptions();
       updateSortCurrent();
       draw();
@@ -2924,7 +2922,7 @@ function addCustomMetricDefinition(label, values, sourceName, roiIndexValues = n
   }}
   if (!metricValues.some(value => value !== null)) return;
   const key = ensureUniqueCustomMetricKey(customMetricKey(label));
-  data.customRoiMetrics.definitions.push({{key, label: String(label), source: sourceName}});
+  data.customRoiMetrics.definitions.push({{key, label: String(label), source: sourceName, origin: "upload"}});
   for (let roi = 0; roi < data.nRois; roi++) data.customRoiMetrics.values[roi][key] = metricValues[roi];
 }}
 function loadCustomMetricRows(rows, sourceName) {{
@@ -3000,7 +2998,7 @@ function categoryCodeFromLabel(label, labelToCode) {{
 }}
 function loadCategoryRows(rowObjects, sourceName) {{
   if (!Array.isArray(rowObjects) || !rowObjects.length || typeof rowObjects[0] !== "object") {{
-    throw new Error("JSON categorical variables must be a list of row objects.");
+    throw new Error("JSON cell identity labels must be a list of row objects.");
   }}
   const headers = Array.from(new Set(rowObjects.flatMap(row => Object.keys(row))));
   const lowerHeaders = headers.map(value => value.toLowerCase());
@@ -3260,7 +3258,7 @@ function metricLabel(metric) {{
   if (metric === "oasis_event_snr") return "inferred spike SNR";
   if (metric === "oasis_rise_tau_seconds") return "inferred spike rise tau";
   if (metric === "oasis_decay_tau_seconds") return "inferred spike decay tau";
-  if (metric === "cell_type_code") return "categorical variable code";
+  if (metric === "cell_type_code") return "cell identity code";
   if (metric === "roi_model_score_probability") return "ROI model score probability";
   if (metric === "roi_area") return "ROI area (px)";
   if (metric === "connectivity") return "Connectivity";
@@ -3599,7 +3597,7 @@ function setSelected(roi) {{
   if (data.oasisAvailable) setOasisThreshold(selectedOasisDefaultThreshold(), false);
   document.getElementById("roiInput").value = suite2pRoi;
   document.getElementById("roiDetailsSummary").textContent = "Selected ROI Details";
-  document.getElementById("readout").textContent = `category ${{cellType}}${{roiModelText}} | area ${{fmt(dffMetrics.roi_area)}} px | skew ${{fmt(metrics.skew)}} connect ${{metrics.connect}} aspect ${{fmt(metrics.aspect)}} compact ${{fmt(metrics.compact)}} | SNR: 95/50 percentile ${{fmt(snr9550)}} | SNR: CaImAn (large-transient score) ${{fmt(postdocSnr)}} | inferred spike SNR ${{fmt(dffMetricValue(dffMetrics, "oasis_event_snr"))}} | rise tau ${{fmt(dffMetricValue(dffMetrics, "oasis_rise_tau_seconds"))}} s | decay tau ${{fmt(dffMetricValue(dffMetrics, "oasis_decay_tau_seconds"))}} s`;
+  document.getElementById("readout").textContent = `cell identity ${{cellType}}${{roiModelText}} | area ${{fmt(dffMetrics.roi_area)}} px | skew ${{fmt(metrics.skew)}} connect ${{metrics.connect}} aspect ${{fmt(metrics.aspect)}} compact ${{fmt(metrics.compact)}} | SNR: 95/50 percentile ${{fmt(snr9550)}} | SNR: CaImAn (large-transient score) ${{fmt(postdocSnr)}} | inferred spike SNR ${{fmt(dffMetricValue(dffMetrics, "oasis_event_snr"))}} | rise tau ${{fmt(dffMetricValue(dffMetrics, "oasis_rise_tau_seconds"))}} s | decay tau ${{fmt(dffMetricValue(dffMetrics, "oasis_decay_tau_seconds"))}} s`;
   document.getElementById("traceTitle").textContent = `Selected ROI - ${{ROI_INDEX_LABEL}} ${{suite2pRoi}}, ${{currentSortPositionText()}}`;
   document.querySelectorAll(".roi").forEach(c => c.classList.toggle("selected", Number(c.dataset.roi) === selected));
   updateLabelControls();
@@ -3687,7 +3685,7 @@ function cellTypeLabelName(label) {{
   if (numeric === 1) return "inhibitory/red";
   if (numeric === -1) return "excitatory/non-red";
   if (numeric === 0) return "unsure";
-  return `category ${{numeric}}`;
+  return `cell identity ${{numeric}}`;
 }}
 function categoryLabelName(label) {{
   return cellTypeLabelName(label);
@@ -3903,7 +3901,7 @@ function morphologyReasons(metrics, dffMetrics, filter, roi = null) {{
     );
     if (!passesCellType) {{
       const selectedLabels = cellTypeFilter.map(value => value === "not_loaded" ? "not loaded" : cellTypeLabelName(Number(value))).join(", ");
-      reasons.push(`category ${{cellTypeLabelName(cellTypeValue)}} does not match selected categories (${{selectedLabels}})`);
+      reasons.push(`cell identity ${{cellTypeLabelName(cellTypeValue)}} does not match selected cell identities (${{selectedLabels}})`);
     }}
   }}
   for (const definition of customMetricDefinitions()) {{
@@ -4644,16 +4642,57 @@ function gbuDefaultThreshold(roi) {{
   const value = dffMetric(roi, "oasis_optimal_threshold");
   return Number.isFinite(Number(value)) ? Number(value) : Number(data.oasisEventThreshold ?? 0.05);
 }}
+var GBU_MAX_ABS_DFF = 20;  // same plausibility rule as multi_session_qc_summary (max_abs_dff)
 function gbuRoiSummary(roi) {{
+  // Events and windows follow the selected-ROI fit panel; windows whose baseline-subtracted dF/F
+  // exceeds GBU_MAX_ABS_DFF in magnitude are left out of the average but still count as events.
   const threshold = gbuDefaultThreshold(roi);
   const d = selectedOasisDiagnostics(roi, threshold);
   if (roi !== selected) oasisDiagnosticsCache.delete(`${{roi}}:${{Number(threshold).toPrecision(8)}}`);
   if (!d) return null;
+  const tr = trace(roi);
   const preFrames = Math.max(3, Math.round(data.frameRate * 0.5));
   const postFrames = Math.max(6, Math.round(data.frameRate * 2.0));
+  const len = preFrames + postFrames + 1;
   const seconds = Math.max(1, data.nFrames - preFrames - postFrames) / data.frameRate;
-  const usable = d.events.length > 0 && d.waveform.length > 0 && d.waveform.every(Number.isFinite);
-  return {{ rate: d.events.length / seconds, waveform: usable ? Float32Array.from(d.waveform) : null, times: d.times }};
+  const sums = new Float64Array(len), counts = new Uint32Array(len), win = new Float64Array(len);
+  let kept = 0, excluded = 0;
+  for (const eventFrame of d.events) {{
+    const baselineValues = [];
+    for (let f = eventFrame - preFrames; f < eventFrame; f++) if (Number.isFinite(tr[f])) baselineValues.push(tr[f]);
+    const median = diagnosticMedian(baselineValues);
+    const baseline = Number.isFinite(median) ? median : 0;
+    let plausible = true;
+    for (let offset = -preFrames; offset <= postFrames; offset++) {{
+      const value = tr[eventFrame + offset] - baseline;
+      win[offset + preFrames] = value;
+      if (Number.isFinite(value) && Math.abs(value) > GBU_MAX_ABS_DFF) {{ plausible = false; break; }}
+    }}
+    if (!plausible) {{ excluded += 1; continue; }}
+    kept += 1;
+    for (let i = 0; i < len; i++) if (Number.isFinite(win[i])) {{ sums[i] += win[i]; counts[i] += 1; }}
+  }}
+  let waveform = null;
+  if (kept) {{
+    waveform = new Float32Array(len);
+    for (let i = 0; i < len; i++) waveform[i] = counts[i] ? sums[i] / counts[i] : NaN;
+    if (!waveform.every(Number.isFinite)) waveform = null;
+  }}
+  const times = Array.from({{length: len}}, (_, i) => (i - preFrames) / data.frameRate);
+  return {{ rate: d.events.length / seconds, waveform, times, kept, excluded }};
+}}
+function gbuExclusionText() {{
+  if (!Array.isArray(gbuRoiStats)) return "";
+  let windows = 0, rois = 0;
+  for (let roi = 0; roi < gbuRoiStats.length; roi++) {{
+    const s = gbuRoiStats[roi];
+    if (!s || !s.excluded || !(labels[roi] === 0 || labels[roi] === 1 || labels[roi] === 2)) continue;
+    windows += s.excluded;
+    if (!s.kept) rois += 1;
+  }}
+  if (!windows) return "";
+  return ` Left out of the average transients: ${{windows.toLocaleString()}} event window${{windows === 1 ? "" : "s"}} reaching |dF/F| > ${{GBU_MAX_ABS_DFF}}`
+    + (rois ? `, which leaves ${{rois}} ROI${{rois === 1 ? "" : "s"}} with no transient.` : ".");
 }}
 function invalidateGbuSummary() {{ startGbuSummary(); }}
 function startGbuSummary() {{
@@ -4704,6 +4743,8 @@ function gbuYTicks(ctx, l, t, ph, lo, hi, n, r, digits) {{
   }}
 }}
 function drawGbuSummary() {{
+  const body = document.getElementById("gbuSummaryBody");
+  if (body && body.hidden) return;  // collapsed: redrawn when shown again
   const counts = new Map([[1, 0], [0, 0], [2, 0], [-1, 0]]);
   for (const value of labels) {{
     const key = value === 1 || value === 0 || value === 2 ? value : -1;
@@ -4736,7 +4777,7 @@ function drawGbuSummary() {{
   if (note) {{
     note.textContent = spikesMissing
       ? "The transient and firing-rate panels need dF/F and inferred spikes; load them to show those panels."
-      : ready ? `${{labels.length}} ROIs: ${{counts.get(1)}} good, ${{counts.get(0)}} bad, ${{counts.get(2)}} unsure, ${{counts.get(-1)}} not labeled.`
+      : ready ? `${{labels.length}} ROIs: ${{counts.get(1)}} good, ${{counts.get(0)}} bad, ${{counts.get(2)}} unsure, ${{counts.get(-1)}} not labeled.` + gbuExclusionText()
       : `Computing per-ROI transients and firing rates: ${{Math.round(100 * gbuProgress)}}%`;
   }}
   if (!ready) {{
@@ -4982,13 +5023,15 @@ document.getElementById("applyCustomRoiUpload").addEventListener("click", () => 
     try {{
       if (kind === "categorical") {{
         loadCellTypeTableText(String(reader.result || ""), file.name);
-        status.textContent = `Loaded categorical ROI variable from ${{file.name}}.`;
+        data.cellTypeLabelOrigin = "upload";
+        renderAutoLoadedFileList();
+        status.textContent = `Loaded cell identity labels from ${{file.name}}.`;
       }} else {{
         loadCustomMetricText(String(reader.result || ""), file.name);
-        status.textContent = `Loaded numerical ROI metric(s) from ${{file.name}}.`;
+        status.textContent = `Loaded QC metric(s) from ${{file.name}}.`;
       }}
     }} catch (error) {{
-      status.textContent = `Could not load ${{kind === "categorical" ? "categorical ROI variable" : "numerical ROI metric"}}: ${{error.message}}`;
+      status.textContent = `Could not load ${{kind === "categorical" ? "cell identity labels" : "QC metric"}}: ${{error.message}}`;
     }}
   }};
   reader.readAsText(file);
@@ -5311,6 +5354,13 @@ if (oasisDiagnosticsPanel && toggleOasisDiagnostics) {{
 // Inferred-spike fit metrics are shown by default whenever spikes are available.
 if (data.oasisAvailable && oasisSpikes) setOasisDiagnosticsVisible(true);
 startGbuSummary();
+document.getElementById("gbuSummaryToggle")?.addEventListener("click", event => {{
+  const body = document.getElementById("gbuSummaryBody");
+  body.hidden = !body.hidden;
+  event.currentTarget.textContent = body.hidden ? "Show" : "Hide";
+  event.currentTarget.setAttribute("aria-expanded", String(!body.hidden));
+  if (!body.hidden) scheduleGbuSummaryDraw();
+}});
 ["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax","roiAreaMin","roiAreaMax","eventSnrMin","andreaPostdocSnrMin","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","roiModelScoreProbabilityMin","roiModelScoreProbabilityMax"].forEach(id => {{
   const element = document.getElementById(id);
   if (!element) return;
