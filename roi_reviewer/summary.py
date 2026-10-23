@@ -2361,7 +2361,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
                 <p>These plots group every ROI in the session by its current label and update as you label. ROIs that a metric filter labeled Bad are counted as Bad.</p>
                 <p><strong>Fraction of ROIs by label:</strong> the share of all ROIs in the session with each label (Good, Bad, Unsure and Not labeled), with the count above each bar.</p>
                 <p><strong>Average calcium transient by label:</strong> each ROI's average dF/F transient is computed as in the selected-ROI fit panel: inferred spikes above that ROI's default amplitude threshold, counted at least 0.25 s apart, each with a window from 0.5 s before to 2 s after the spike and the median of its own pre-spike part subtracted. The line is the mean of those per-ROI averages for each label and the band is the standard error of the mean across ROIs, so each ROI counts once however many spikes it has. Event windows whose baseline-subtracted dF/F exceeds 20 in magnitude are left out of the average, as in the multi-session QC summary: values that large come from near-zero baselines rather than calcium signals, and a few of them would otherwise set the scale for the whole label. Those events still count toward the firing rate. ROIs with no spike above their threshold, or with every window left out, have no transient; the note above the plots gives the counts.</p>
-                <p><strong>Firing rate by label:</strong> one dot per ROI, its number of inferred spikes above threshold (counted as above) divided by the analyzed recording time, in events per second. The box marks the median and quartiles and the whiskers the 5th and 95th percentiles; above 500 ROIs per label, an even subsample of the dots is drawn.</p>
+                <p><strong>Firing rate by label:</strong> a kernel density estimate (KDE) of the per-ROI firing rates for each label, where an ROI's firing rate is its number of inferred spikes above threshold (counted as above) divided by the analyzed recording time, in events per second. The curves use a Gaussian kernel with Silverman's bandwidth, reflected at zero because rates cannot be negative, and each has area 1, so labels with different numbers of ROIs compare by shape rather than height. The dashed line marks each label's median, and the x-axis runs to about the 99.5th percentile of all labeled ROIs. A label whose ROIs all share one rate is drawn as a solid line at that rate.</p>
                 <p>The two lower panels need dF/F and inferred spikes. They are computed once when both are loaded and then only regrouped as labels change; changing the amplitude threshold for the selected ROI does not change them.</p>
               </div>
               <div id="gbuSummaryBody">
@@ -4742,6 +4742,30 @@ function gbuYTicks(ctx, l, t, ph, lo, hi, n, r, digits) {{
     ctx.fillText(v.toFixed(digits), l - 5 * r, t + (1 - i / n) * ph);
   }}
 }}
+function gbuKde(values, grid) {{
+  // Gaussian KDE with Silverman's bandwidth, reflected at zero (rates cannot be negative). values must be sorted.
+  const n = values.length;
+  if (n < 2) return null;
+  let mean = 0;
+  for (const v of values) mean += v;
+  mean /= n;
+  let ss = 0;
+  for (const v of values) ss += (v - mean) * (v - mean);
+  const sd = Math.sqrt(ss / (n - 1));
+  const iqr = gbuPercentile(values, 0.75) - gbuPercentile(values, 0.25);
+  const spread = iqr > 0 ? Math.min(sd, iqr / 1.34) : sd;
+  const bw = 0.9 * spread * Math.pow(n, -0.2);
+  if (!(bw > 0)) return null;
+  const norm = 1 / (n * bw * Math.sqrt(2 * Math.PI));
+  return grid.map(x => {{
+    let s = 0;
+    for (const v of values) {{
+      const a = (x - v) / bw, r = (x + v) / bw;
+      s += Math.exp(-0.5 * a * a) + Math.exp(-0.5 * r * r);
+    }}
+    return s * norm;
+  }});
+}}
 function drawGbuSummary() {{
   const body = document.getElementById("gbuSummaryBody");
   if (body && body.hidden) return;  // collapsed: redrawn when shown again
@@ -4840,54 +4864,63 @@ function drawGbuSummary() {{
   }}
   if (rc) {{
     const groups = [];
-    let hi = 0;
+    const pooled = [];
     for (const g of GBU_GROUPS) {{
       const values = [];
       for (let roi = 0; roi < gbuRoiStats.length; roi++) {{
         const s = gbuRoiStats[roi];
-        if (s && labels[roi] === g.code && Number.isFinite(s.rate)) values.push({{ roi, v: s.rate }});
+        if (s && labels[roi] === g.code && Number.isFinite(s.rate)) values.push(s.rate);
       }}
-      values.sort((a, b) => a.v - b.v);
-      if (values.length) hi = Math.max(hi, values[values.length - 1].v);
+      values.sort((a, b) => a - b);
+      for (const v of values) pooled.push(v);
       groups.push({{ g, values }});
     }}
-    // round the axis top up to 1, 2, 2.5 or 5 x 10^k so the four ticks land on even values
-    if (hi > 0) {{
-      const raw = hi * 1.05 / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    pooled.sort((a, b) => a - b);
+    let hi = pooled.length ? gbuPercentile(pooled, 0.995) * 1.1 : 1;
+    if (!(hi > 0)) hi = pooled.length ? Math.max(pooled[pooled.length - 1], 1e-3) * 1.1 : 1;
+    {{
+      const raw = hi / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
       hi = 4 * mag * [1, 2, 2.5, 5, 10].find(m => m * mag >= raw);
-    }} else hi = 1;
-    const l = 56 * rc.r, rr = 12 * rc.r, t = 10 * rc.r, b = 30 * rc.r, pw = rc.w - l - rr, ph = rc.h - t - b;
-    const yOf = v => t + (1 - v / hi) * ph;
-    drawAxes(rc.ctx, rc.w, rc.h, l, t, pw, ph, "", "Firing rate (events/s)", {{ yLabelX: 12 * rc.r }});
-    gbuYTicks(rc.ctx, l, t, ph, 0, hi, 4, rc.r, Math.max(0, Math.min(4, 1 - Math.floor(Math.log10(hi / 4)))));
-    const slot = pw / groups.length;
-    groups.forEach(({{ g, values }}, i) => {{
-      const cx = l + slot * (i + 0.5);
-      rc.ctx.fillStyle = "#475467"; rc.ctx.font = `${{11 * rc.r}}px Arial`; rc.ctx.textAlign = "center"; rc.ctx.textBaseline = "top";
-      rc.ctx.fillText(`${{g.name}} (n = ${{values.length}})`, cx, t + ph + 5 * rc.r);
-      if (!counts.get(1) && !counts.get(0) && !counts.get(2) && i === 1) {{
-        rc.ctx.textBaseline = "middle";
-        rc.ctx.fillText("Label ROIs as good, bad or unsure to see their firing rates", l + pw / 2, t + ph / 2);
-        rc.ctx.textBaseline = "top";
+    }}
+    const grid = Array.from({{ length: 200 }}, (_, i) => hi * i / 199);
+    const curves = groups.map(({{ g, values }}) => ({{ g, values, density: gbuKde(values, grid), median: gbuPercentile(values, 0.5) }}));
+    let yMax = 0;
+    for (const cv of curves) if (cv.density) for (const d of cv.density) yMax = Math.max(yMax, d);
+    yMax = yMax > 0 ? yMax * 1.5 : 1;  // headroom above the curves for the legend
+    const l = 56 * rc.r, rr = 12 * rc.r, t = 10 * rc.r, b = 40 * rc.r, pw = rc.w - l - rr, ph = rc.h - t - b;
+    const xOf = x => l + x / hi * pw;
+    const yOf = y => t + (1 - y / yMax) * ph;
+    drawAxes(rc.ctx, rc.w, rc.h, l, t, pw, ph, "Firing rate (events/s)", "Density", {{ xLabelY: rc.h - 6 * rc.r, yLabelX: 12 * rc.r }});
+    drawNumericTicks(rc.ctx, l, t, pw, ph, 0, hi, 0, yMax, 4, 3);
+    if (!counts.get(1) && !counts.get(0) && !counts.get(2)) {{
+      rc.ctx.fillStyle = "#475467"; rc.ctx.font = `${{11 * rc.r}}px Arial`; rc.ctx.textAlign = "center"; rc.ctx.textBaseline = "middle";
+      rc.ctx.fillText("Label ROIs as good, bad or unsure to see their firing rates", l + pw / 2, t + ph / 2);
+      return;
+    }}
+    curves.forEach((cv, k) => {{
+      const ctx = rc.ctx, color = cv.g.color;
+      if (cv.density) {{
+        ctx.save();
+        ctx.globalAlpha = 0.15; ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(xOf(0), yOf(0));
+        grid.forEach((x, i) => ctx.lineTo(xOf(x), yOf(cv.density[i])));
+        ctx.lineTo(xOf(hi), yOf(0)); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        drawLineSeries(ctx, grid.map((x, i) => [x, cv.density[i]]), xOf, yOf, color, 1.6);
       }}
-      if (!values.length) return;
-      const sorted = values.map(x => x.v);
-      const stride = Math.max(1, Math.ceil(values.length / 500));
-      rc.ctx.save();
-      rc.ctx.fillStyle = g.color; rc.ctx.globalAlpha = 0.45;
-      for (let k = 0; k < values.length; k += stride) {{
-        const jitter = (((values[k].roi * 2654435761) % 1000) / 1000 - 0.5) * slot * 0.5;
-        rc.ctx.beginPath(); rc.ctx.arc(cx + jitter, yOf(values[k].v), 1.8 * rc.r, 0, 2 * Math.PI); rc.ctx.fill();
+      if (Number.isFinite(cv.median) && cv.median <= hi) {{
+        ctx.save();
+        ctx.strokeStyle = color; ctx.lineWidth = (cv.density ? 1 : 1.6) * rc.r; ctx.setLineDash(cv.density ? [4 * rc.r, 3 * rc.r] : []);
+        // median drawn from the axis up to its own curve, so it never crosses the legend
+        let top = yMax / 1.5;
+        if (cv.density) {{ const pos = cv.median / hi * (grid.length - 1), i0 = Math.floor(pos), i1 = Math.min(grid.length - 1, i0 + 1);
+          top = cv.density[i0] + (cv.density[i1] - cv.density[i0]) * (pos - i0); }}
+        ctx.beginPath(); ctx.moveTo(xOf(cv.median), t + ph); ctx.lineTo(xOf(cv.median), yOf(top)); ctx.stroke();
+        ctx.restore();
       }}
-      rc.ctx.restore();
-      const q = p => yOf(gbuPercentile(sorted, p)), bw = slot * 0.34;
-      rc.ctx.strokeStyle = "#101828"; rc.ctx.lineWidth = 1.2 * rc.r;
-      rc.ctx.strokeRect(cx - bw / 2, q(0.75), bw, q(0.25) - q(0.75));
-      rc.ctx.beginPath();
-      rc.ctx.moveTo(cx - bw / 2, q(0.5)); rc.ctx.lineTo(cx + bw / 2, q(0.5));
-      rc.ctx.moveTo(cx, q(0.75)); rc.ctx.lineTo(cx, q(0.95));
-      rc.ctx.moveTo(cx, q(0.25)); rc.ctx.lineTo(cx, q(0.05));
-      rc.ctx.stroke();
+      const n = cv.values.length;
+      const text = n ? `${{cv.g.name}} (n = ${{n}}, median ${{cv.median.toPrecision(3)}}/s)` : `${{cv.g.name}} (n = 0)`;
+      ctx.fillStyle = color; ctx.font = `${{11 * rc.r}}px Arial`; ctx.textAlign = "right"; ctx.textBaseline = "top";
+      ctx.fillText(text, l + pw - 4 * rc.r, t + 4 * rc.r + k * 14 * rc.r);
     }});
   }}
 }}
