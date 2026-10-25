@@ -33,11 +33,13 @@ output_dir: outputs/my_session
 roi_index_label: "Original Index"
 
 # all_rois | soma | dendrite | dendrite_relaxed | null -- the morphology preset
-# the "Target structure" menu in the reviewer's metric filters opens on. null
+# the "Filter set name" menu in the reviewer's metric filters opens on. null
 # takes the value recorded in the session's pipeline parameters, if any. Preset
-# windows were calibrated on Suite2p morphology values and do not transfer to
-# recomputed external-mask metrics; prefer all_rois (no thresholds) for those.
-target_structure: null
+# windows were calibrated on Suite2p morphology values. Masks from other software
+# get the same shape statistics computed Suite2p's way, but binary masks carry
+# no pixel weights, so their values are approximate; all_rois (no thresholds) is
+# the safest start for them. (Formerly target_structure, still accepted.)
+filter_set: null
 
 # Open with every ROI unlabeled (recommended) or pre-labeled from a stored
 # classifier score file (roi_model_scores.h5 / roi_qc_predictions.h5), when one
