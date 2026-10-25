@@ -6468,14 +6468,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--target-structure",
+        "--filter-set",
+        dest="filter_set",
         choices=SUMMARY_TARGET_STRUCTURES,
         default=None,
         help=(
             "Built-in filter set (ROI metric thresholds) the reviewer's distributions start from; "
-            "default: the session's pipeline target structure."
+            "default: the filter set matching the session's pipeline target structure."
         ),
     )
+    # Former name of --filter-set, kept so existing pipeline calls and scripts keep working.
+    parser.add_argument("--target-structure", dest="filter_set", choices=SUMMARY_TARGET_STRUCTURES, help=argparse.SUPPRESS)
     parser.add_argument(
         "--initialize-labels-from-roi-model-scores",
         "--initialize-labels-from-roi-qc",
@@ -6555,7 +6558,7 @@ def main() -> None:
         output_dir=output_dir,
         pdf_name=args.pdf_name,
         html_name=args.html_name,
-        target_structure=args.target_structure,
+        target_structure=args.filter_set,
         input_layout=args.input_layout,
         initialize_labels_from_roi_model_scores=args.initialize_labels_from_roi_model_scores,
         custom_roi_metrics=args.custom_roi_metrics,

@@ -30,12 +30,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # exactly one generator flag in build_command(); see docs/cli-mapping.md.
 KNOWN_KEYS = {
     "name", "notes", "session_path", "output_dir", "input_layout",
-    "roi_index_label", "target_structure", "initialize_labels_from_model_scores",
+    "roi_index_label", "filter_set", "target_structure", "initialize_labels_from_model_scores",
     "custom_roi_metrics", "pdf_name", "html_name", "archive_output", "archive_name",
     "custom_roi_metric_sections", "filter_settings", "html_only",
 }
 METRIC_SECTIONS = {"uploaded", "model_derived", "morphology", "fluorescence", "inferred_spike"}
-TARGET_STRUCTURES = {"all_rois", "soma", "dendrite", "dendrite_relaxed"}
+FILTER_SETS = {"all_rois", "soma", "dendrite", "dendrite_relaxed"}
 
 
 def load_config(path: Path) -> dict:
@@ -52,10 +52,15 @@ def load_config(path: Path) -> dict:
     layout = cfg.get("input_layout", "auto")
     if layout not in LAYOUTS:
         raise SystemExit(f"{path}: input_layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
-    target = cfg.get("target_structure")
-    if target and target not in TARGET_STRUCTURES:
-        raise SystemExit(f"{path}: target_structure must be one of {sorted(TARGET_STRUCTURES)} "
-                         f"or null, got {target!r}")
+    if "target_structure" in cfg:
+        # former name of filter_set
+        if "filter_set" in cfg:
+            raise SystemExit(f"{path}: give filter_set only; target_structure is its former name")
+        cfg["filter_set"] = cfg.pop("target_structure")
+    filter_set = cfg.get("filter_set")
+    if filter_set and filter_set not in FILTER_SETS:
+        raise SystemExit(f"{path}: filter_set must be one of {sorted(FILTER_SETS)} "
+                         f"or null, got {filter_set!r}")
     metrics = cfg.get("custom_roi_metrics") or []
     if isinstance(metrics, str):
         metrics = [metrics]
@@ -88,8 +93,8 @@ def build_command(cfg: dict, session: Path, output_dir: Path) -> list[str]:
         cmd += ["--input-layout", cfg["input_layout"]]
     if cfg.get("roi_index_label"):
         cmd += ["--roi-index-label", cfg["roi_index_label"]]
-    if cfg.get("target_structure"):
-        cmd += ["--target-structure", cfg["target_structure"]]
+    if cfg.get("filter_set"):
+        cmd += ["--filter-set", cfg["filter_set"]]
     if cfg.get("initialize_labels_from_model_scores"):
         cmd += ["--initialize-labels-from-roi-model-scores"]
     for metric_path in cfg.get("custom_roi_metrics") or []:
