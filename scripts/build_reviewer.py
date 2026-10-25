@@ -32,7 +32,9 @@ KNOWN_KEYS = {
     "name", "notes", "session_path", "output_dir", "input_layout",
     "roi_index_label", "target_structure", "initialize_labels_from_model_scores",
     "custom_roi_metrics", "pdf_name", "html_name", "archive_output", "archive_name",
+    "custom_roi_metric_sections", "filter_settings", "html_only",
 }
+METRIC_SECTIONS = {"uploaded", "model_derived", "morphology", "fluorescence", "inferred_spike"}
 TARGET_STRUCTURES = {"all_rois", "soma", "dendrite", "dendrite_relaxed"}
 
 
@@ -60,6 +62,17 @@ def load_config(path: Path) -> dict:
     if not isinstance(metrics, list) or not all(isinstance(m, str) for m in metrics):
         raise SystemExit(f"{path}: custom_roi_metrics must be a path or a list of paths")
     cfg["custom_roi_metrics"] = metrics
+    sections = cfg.get("custom_roi_metric_sections") or {}
+    if not isinstance(sections, dict):
+        raise SystemExit(f"{path}: custom_roi_metric_sections must map metric names to sections")
+    bad = {name: sec for name, sec in sections.items() if sec not in METRIC_SECTIONS}
+    if bad:
+        raise SystemExit(f"{path}: custom_roi_metric_sections has unknown section(s) {bad}; "
+                         f"use one of {sorted(METRIC_SECTIONS)}")
+    cfg["custom_roi_metric_sections"] = sections
+    settings = cfg.get("filter_settings")
+    if settings is not None and not isinstance(settings, str):
+        raise SystemExit(f"{path}: filter_settings must be the path of an exported settings JSON (or YAML) file")
     return cfg
 
 
@@ -81,6 +94,12 @@ def build_command(cfg: dict, session: Path, output_dir: Path) -> list[str]:
         cmd += ["--initialize-labels-from-roi-model-scores"]
     for metric_path in cfg.get("custom_roi_metrics") or []:
         cmd += ["--custom-roi-metrics", str(resolve(metric_path))]
+    for metric_name, section in (cfg.get("custom_roi_metric_sections") or {}).items():
+        cmd += ["--custom-roi-metric-section", f"{metric_name}={section}"]
+    if cfg.get("filter_settings"):
+        cmd += ["--filter-settings", str(resolve(cfg["filter_settings"]))]
+    if cfg.get("html_only"):
+        cmd += ["--html-only"]
     if cfg.get("pdf_name"):
         cmd += ["--pdf-name", cfg["pdf_name"]]
     if cfg.get("html_name"):

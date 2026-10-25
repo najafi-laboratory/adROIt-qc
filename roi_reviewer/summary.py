@@ -17,7 +17,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import h5py
 import matplotlib
@@ -42,6 +42,8 @@ from roi_reviewer.roi_metrics import (
 
 QC_PRESETS: dict[str, dict[str, Any]] = {}
 SUMMARY_TARGET_STRUCTURES = ("all_rois", "soma", "dendrite", "dendrite_relaxed")
+# Filter-menu sections an uploaded ROI metric can be shown under (--custom-roi-metric-section).
+CUSTOM_METRIC_SECTIONS = ("uploaded", "model_derived", "morphology", "fluorescence", "inferred_spike")
 
 
 def normalize_qc_target(target_structure: str) -> str:
@@ -58,6 +60,8 @@ def normalize_qc_target(target_structure: str) -> str:
 PDF_NAME_TEMPLATE = "{session_name}_processing_summary.pdf"
 HTML_NAME_TEMPLATE = "{session_name}_interactive_fov_roi_dff.html"
 ROI_INDEX_LABEL = "Suite2p Original Index"  # override with --roi-index-label, e.g. "Original Index"
+_DEFAULT_ROI_INDEX_LABEL = ROI_INDEX_LABEL
+_LAST_BUILD_WAS_HTML_ONLY = False  # set by create_preprocessing_summary for main()'s message
 EMBEDDED_DFF_BYTE_LIMIT = 80 * 1024 * 1024
 EMBEDDED_DFF_BASE64_EXPANSION = 4 / 3
 EMBEDDED_DFF_HTML_OVERHEAD = 2 * 1024 * 1024
@@ -1181,27 +1185,182 @@ def _trace_skew(trace: np.ndarray | None) -> float:
     return float(np.mean((centered / sd) ** 3))
 
 
-def _mask_geometry_metrics(ypix: np.ndarray, xpix: np.ndarray) -> dict[str, float]:
-    if xpix.size == 0 or ypix.size == 0:
-        return {"npix": 0.0, "aspect_ratio": np.nan, "compact": np.nan, "footprint": np.nan}
-    area = float(xpix.size)
-    width = float(np.max(xpix) - np.min(xpix) + 1)
-    height = float(np.max(ypix) - np.min(ypix) + 1)
-    shortest = max(1.0, min(width, height))
-    bbox_area = max(1.0, width * height)
-    pixels = {(int(y), int(x)) for y, x in zip(ypix, xpix)}
-    perimeter = 0
-    for y, x in pixels:
-        for neighbor in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-            if neighbor not in pixels:
-                perimeter += 1
-    compact = float((perimeter * perimeter) / (4.0 * np.pi * area)) if area > 0 else np.nan
+# Suite2p's ROI shape statistics, reimplemented from their definitions in
+# suite2p.detection.stats (roi_stats, soma_crop, fitMVGaus, median_pix) so that masks
+# from other software are scored on the same scale as Suite2p ROIs. Suite2p sessions
+# never pass through this code: their stat.npy values are used as they are.
+SUITE2P_SHAPE_FIELDS = (
+    "med", "npix", "soma_crop", "npix_soma", "mrs", "mrs0", "compact",
+    "radius", "aspect_ratio", "footprint", "npix_norm", "npix_norm_no_crop", "overlap",
+)
+DEFAULT_SHAPE_DIAMETER = (12.0, 12.0)  # Suite2p's roi_stats default, in pixels [dy, dx]
+_DISK_REFERENCE_CACHE: dict[tuple[float, float], np.ndarray] = {}
+
+
+def _shape_diameter(value: Any = None) -> tuple[float, float]:
+    """Expected cell diameter [dy, dx] in pixels; a single number means the same in y and x."""
+
+    if value is None:
+        return DEFAULT_SHAPE_DIAMETER
+    values = np.atleast_1d(np.asarray(value, dtype=np.float64)).reshape(-1)
+    if values.size == 1:
+        values = np.repeat(values, 2)
+    if values.size != 2 or not np.all(np.isfinite(values)) or np.any(values <= 0):
+        raise ValueError(f"ROI shape diameter must be one or two positive numbers, got {value!r}.")
+    return float(values[0]), float(values[1])
+
+
+def _center_pixel(ypix: np.ndarray, xpix: np.ndarray) -> list[float]:
+    """The ROI pixel nearest the coordinate-wise median (Suite2p's ``med``)."""
+
+    nearest = int(np.argmin((ypix - np.median(ypix)) ** 2 + (xpix - np.median(xpix)) ** 2))
+    return [float(ypix[nearest]), float(xpix[nearest])]
+
+
+def _soma_crop_mask(ypix: np.ndarray, xpix: np.ndarray, lam: np.ndarray, center: Sequence[float]) -> np.ndarray:
+    """Pixels inside the soma boundary, as Suite2p's soma crop defines it.
+
+    The weight enclosed within radius r of the center is evaluated at r = 0, 1, 2, ...
+    The boundary is the first radius, after the enclosed weight has started growing by
+    more than a third of its largest one-pixel increase, at which the growth falls
+    back below that level. ROIs of 10 pixels or fewer are not cropped.
+    """
+
+    n = ypix.size
+    keep_all = np.ones(n, dtype=bool)
+    if n <= 10:
+        return keep_all
+    distance = np.hypot(ypix - center[0], xpix - center[1])
+    radii = np.arange(0.0, float(distance.max()), 1.0)
+    if radii.size < 2:
+        return keep_all
+    order = np.argsort(distance, kind="stable")
+    cumulative = np.concatenate(([0.0], np.cumsum(np.asarray(lam, dtype=np.float64)[order])))
+    enclosed = cumulative[np.searchsorted(distance[order], radii, side="left")]  # weight strictly inside r
+    growth = np.diff(enclosed)
+    level = growth.max() / 3.0
+    boundary = radii[-1]
+    rising = np.flatnonzero(growth > level)
+    if rising.size:
+        falling = np.flatnonzero(growth[rising[0]:] < level)
+        if falling.size:
+            boundary = radii[rising[0] + falling[0]]
+    crop = distance < boundary
+    return crop if crop.any() else keep_all
+
+
+def _disk_reference_distances(diameter: tuple[float, float]) -> np.ndarray:
+    """Sorted diameter-normalized distances of a pixel grid spanning +/-3 diameters (the ideal disk)."""
+
+    if diameter not in _DISK_REFERENCE_CACHE:
+        dy, dx = diameter
+        gy, gx = np.meshgrid(np.arange(-3 * dy, 3 * dy + 1) / dy, np.arange(-3 * dx, 3 * dx + 1) / dx, indexing="ij")
+        _DISK_REFERENCE_CACHE[diameter] = np.sort(np.hypot(gy, gx).reshape(-1))
+    return _DISK_REFERENCE_CACHE[diameter]
+
+
+def _ellipse_radii(ypix: np.ndarray, xpix: np.ndarray, lam: np.ndarray, diameter: tuple[float, float], n_sd: float = 2.0) -> np.ndarray:
+    """Major and minor radii (diameter units) of the weighted Gaussian fit, at ``n_sd`` standard deviations."""
+
+    weights = np.asarray(lam, dtype=np.float64)
+    positive = weights > 0
+    if not positive.any():
+        return np.array([np.nan, np.nan])
+    coords = np.stack((ypix[positive] / diameter[0], xpix[positive] / diameter[1])).astype(np.float64)
+    w = weights[positive] / weights[positive].sum()
+    centered = coords - (coords * w).sum(axis=1, keepdims=True)
+    covariance = (centered * w) @ centered.T
+    variances = np.clip(np.linalg.eigvalsh(covariance), 0.0, None)
+    return np.sort(n_sd * np.sqrt(variances))[::-1]
+
+
+def suite2p_shape_stats(
+    ypix: np.ndarray,
+    xpix: np.ndarray,
+    lam: np.ndarray | None = None,
+    *,
+    diameter: Any = None,
+    center: Sequence[float] | None = None,
+) -> dict[str, Any]:
+    """Suite2p's per-ROI shape fields for one ROI.
+
+    ``lam`` defaults to uniform weights, which is what a binary mask provides; Suite2p
+    ROIs carry detection weights, so binary masks give approximate values (see docs).
+    ``footprint`` (Suite2p's detection spatial scale) cannot be derived from a mask
+    and is returned as NaN. ``npix_norm`` and ``overlap`` need all ROIs and are added
+    by :func:`complete_suite2p_shape_fields`.
+    """
+
+    ypix = np.asarray(ypix, dtype=np.int64).reshape(-1)
+    xpix = np.asarray(xpix, dtype=np.int64).reshape(-1)
+    weights = np.ones(ypix.size, dtype=np.float32) if lam is None else np.asarray(lam, dtype=np.float32).reshape(-1)
+    d = _shape_diameter(diameter)
+    if ypix.size == 0:
+        return {"med": [np.nan, np.nan], "npix": 0, "soma_crop": np.zeros(0, bool), "npix_soma": 0, "mrs": np.nan,
+                "mrs0": np.nan, "compact": np.nan, "radius": np.nan, "aspect_ratio": np.nan, "footprint": np.nan}
+    med = list(center) if center is not None else _center_pixel(ypix, xpix)
+    crop = _soma_crop_mask(ypix, xpix, weights, med)
+    yc, xc, wc = ypix[crop], xpix[crop], weights[crop]
+    distance = np.hypot((yc - np.median(yc)) / d[0], (xc - np.median(xc)) / d[1])
+    mrs = float(distance.mean())
+    mrs0 = float(_disk_reference_distances(d)[: yc.size].mean())
+    radii = _ellipse_radii(yc, xc, wc, d)
     return {
-        "npix": area,
-        "aspect_ratio": float(max(width, height) / shortest),
-        "compact": compact,
-        "footprint": float(area / bbox_area),
+        "med": med,
+        "npix": int(ypix.size),
+        "soma_crop": crop,
+        "npix_soma": int(crop.sum()),
+        "mrs": mrs,
+        "mrs0": mrs0,
+        "compact": float(max(1.0, mrs / (1e-10 + mrs0))),
+        "radius": float(radii[0] * np.mean(d)),
+        "aspect_ratio": float(2.0 * radii[0] / (0.01 + radii[0] + radii[1])),
+        "footprint": np.nan,
     }
+
+
+def complete_suite2p_shape_fields(
+    stat: Sequence[dict[str, Any]],
+    *,
+    image_shape: tuple[int, int] | None = None,
+    diameter: Any = None,
+) -> list[str]:
+    """Fill in any Suite2p shape field an external stat entry lacks; existing values are kept.
+
+    Returns the names of the fields that were computed for at least one ROI.
+    ``npix_norm`` divides by the median over all ROIs (Suite2p's convention for
+    Cellpose detections, since external ROIs have no detection order), and
+    ``overlap`` marks pixels shared with another ROI.
+    """
+
+    filled: set[str] = set()
+    for entry in stat:
+        missing = [field for field in SUITE2P_SHAPE_FIELDS[:10] if field not in entry]
+        if not missing:
+            continue
+        lam = entry.get("lam")
+        computed = suite2p_shape_stats(entry["ypix"], entry["xpix"], lam, diameter=diameter,
+                                       center=entry.get("med") if "med" in entry else None)
+        for field in missing:
+            entry[field] = computed[field]
+            filled.add(field)
+    if stat and any("npix_norm" not in entry or "npix_norm_no_crop" not in entry for entry in stat):
+        npix_soma = np.array([float(entry.get("npix_soma", np.size(entry["ypix"]))) for entry in stat])
+        npix = np.array([float(np.size(entry["ypix"])) for entry in stat])
+        for entry, soma, whole in zip(stat, npix_soma / (np.median(npix_soma) + 1e-10), npix / (np.median(npix) + 1e-10)):
+            if "npix_norm" not in entry:
+                entry["npix_norm"] = float(soma); filled.add("npix_norm")
+            if "npix_norm_no_crop" not in entry:
+                entry["npix_norm_no_crop"] = float(whole); filled.add("npix_norm_no_crop")
+    if stat and image_shape is not None and any("overlap" not in entry for entry in stat):
+        counts = np.zeros(tuple(int(v) for v in image_shape), dtype=np.int32)
+        for entry in stat:
+            np.add.at(counts, (np.asarray(entry["ypix"], dtype=np.int64), np.asarray(entry["xpix"], dtype=np.int64)), 1)
+        for entry in stat:
+            if "overlap" not in entry:
+                entry["overlap"] = counts[np.asarray(entry["ypix"], dtype=np.int64), np.asarray(entry["xpix"], dtype=np.int64)] > 1
+                filled.add("overlap")
+    return sorted(filled)
 
 
 def _suite2p_like_stat_entry(
@@ -1209,6 +1368,7 @@ def _suite2p_like_stat_entry(
     xpix: np.ndarray,
     lam: np.ndarray | None = None,
     trace: np.ndarray | None = None,
+    diameter: Any = None,
 ) -> dict[str, Any]:
     ypix = np.asarray(ypix, dtype=np.int64).reshape(-1)
     xpix = np.asarray(xpix, dtype=np.int64).reshape(-1)
@@ -1224,29 +1384,16 @@ def _suite2p_like_stat_entry(
     ypix = ypix[order]
     xpix = xpix[order]
     lam = lam[order]
-    metrics = _mask_geometry_metrics(ypix, xpix)
-    med = np.array(
-        [
-            float(np.median(ypix)) if ypix.size else np.nan,
-            float(np.median(xpix)) if xpix.size else np.nan,
-        ],
-        dtype=np.float32,
-    )
-    return {
-        "ypix": ypix,
-        "xpix": xpix,
-        "lam": lam,
-        "med": med,
-        "npix": int(metrics["npix"]),
-        "aspect_ratio": metrics["aspect_ratio"],
-        "compact": metrics["compact"],
-        "footprint": metrics["footprint"],
-        "skew": _trace_skew(trace),
-        "external_roi": True,
-    }
+    entry = {"ypix": ypix, "xpix": xpix, "lam": lam}
+    entry.update(suite2p_shape_stats(ypix, xpix, lam, diameter=diameter))
+    entry["skew"] = _trace_skew(trace)
+    entry["external_roi"] = True
+    return entry
 
 
-def label_mask_to_suite2p_stat(label_mask: np.ndarray, traces: np.ndarray | None = None) -> np.ndarray:
+def label_mask_to_suite2p_stat(
+    label_mask: np.ndarray, traces: np.ndarray | None = None, diameter: Any = None
+) -> np.ndarray:
     """Convert a dense integer ROI-label image into Suite2p-like stat entries.
 
     Background must be zero. Positive integer labels are converted in ascending
@@ -1262,9 +1409,10 @@ def label_mask_to_suite2p_stat(label_mask: np.ndarray, traces: np.ndarray | None
     for row, label in enumerate(labels):
         ypix, xpix = np.where(mask == label)
         trace = None if traces is None or row >= traces.shape[0] else np.asarray(traces[row])
-        entry = _suite2p_like_stat_entry(ypix, xpix, trace=trace)
+        entry = _suite2p_like_stat_entry(ypix, xpix, trace=trace, diameter=diameter)
         entry["source_label"] = label
         stat.append(entry)
+    complete_suite2p_shape_fields(stat, image_shape=mask.shape, diameter=diameter)
     return np.asarray(stat, dtype=object)
 
 
@@ -1298,6 +1446,7 @@ def spatial_matrix_to_suite2p_stat(
     traces: np.ndarray | None = None,
     *,
     order: str = "F",
+    diameter: Any = None,
 ) -> np.ndarray:
     """Convert an ROI spatial-component matrix into Suite2p-like stat entries.
 
@@ -1329,7 +1478,8 @@ def spatial_matrix_to_suite2p_stat(
             lam = values[flat].astype(np.float32, copy=False)
         ypix, xpix = np.unravel_index(flat, image_shape, order=order)
         trace = None if traces is None or row >= traces.shape[0] else np.asarray(traces[row])
-        stat.append(_suite2p_like_stat_entry(ypix, xpix, lam=lam, trace=trace))
+        stat.append(_suite2p_like_stat_entry(ypix, xpix, lam=lam, trace=trace, diameter=diameter))
+    complete_suite2p_shape_fields(stat, image_shape=tuple(image_shape), diameter=diameter)
     return np.asarray(stat, dtype=object)
 
 
@@ -1338,10 +1488,22 @@ def _load_layout_stat(
     traces: np.ndarray | None = None,
     mean_green: np.ndarray | None = None,
 ) -> np.ndarray:
+    metadata = _load_external_metadata(layout.input_dir) if layout.name == "external_rois" else {}
+    diameter = metadata.get("diameter")
     if layout.stat_path.exists():
-        return np.load(layout.stat_path, allow_pickle=True)
+        stat = np.load(layout.stat_path, allow_pickle=True)
+        if layout.name == "external_rois":
+            # Suite2p's own sessions are used as they are; an external stat.npy keeps every
+            # field it has and gains only the Suite2p shape fields it lacks.
+            shape = tuple(mean_green.shape) if mean_green is not None else None
+            filled = complete_suite2p_shape_fields(stat, image_shape=shape, diameter=diameter)
+            if filled:
+                print(f"Computed Suite2p shape fields missing from {layout.stat_path.name}: {', '.join(filled)}")
+        return stat
     if layout.roi_mask_path is not None and layout.roi_mask_path.exists():
-        return label_mask_to_suite2p_stat(np.load(layout.roi_mask_path, allow_pickle=False), traces=traces)
+        return label_mask_to_suite2p_stat(
+            np.load(layout.roi_mask_path, allow_pickle=False), traces=traces, diameter=diameter
+        )
     if layout.spatial_matrix_path is not None and layout.spatial_matrix_path.exists():
         image_shape = _load_external_image_shape(layout, mean_green)
         if image_shape is None:
@@ -1349,10 +1511,9 @@ def _load_layout_stat(
                 "External spatial-component matrices require a FOV shape. Supply mean_func.npy, "
                 "external_roi_metadata.json with image_shape, or image_shape.npy."
             )
-        metadata = _load_external_metadata(layout.input_dir)
         order = str(metadata.get("flatten_order", metadata.get("order", "F")))
         components = sparse.load_npz(layout.spatial_matrix_path)
-        return spatial_matrix_to_suite2p_stat(components, image_shape, traces=traces, order=order)
+        return spatial_matrix_to_suite2p_stat(components, image_shape, traces=traces, order=order, diameter=diameter)
     raise FileNotFoundError(
         f"Could not find ROI geometry for external layout in {layout.input_dir}. "
         "Expected stat.npy, roi_mask.npy, label_mask.npy, masks.npy, or spatial_components.npz."
@@ -1714,6 +1875,128 @@ def _write_summary_pdf(
     plt.close(motion_fig)
 
 
+def _extract_reviewer_payload(html_path: Path) -> dict[str, Any]:
+    """Read the embedded data payload back out of a generated (or saved) reviewer HTML."""
+
+    text = html_path.read_text(encoding="utf-8")
+    match = re.search(r'<script[^>]*id="payload"[^>]*>(.*?)</script>', text, flags=re.S)
+    if match is None:
+        raise ValueError(f"No reviewer payload found in {html_path}; is it a reviewer HTML file?")
+    payload = json.loads(match.group(1))
+    if not isinstance(payload, dict) or "nRois" not in payload or "session" not in payload:
+        raise ValueError(f"The payload in {html_path} is not a reviewer payload.")
+    return payload
+
+
+def _assign_custom_metric_sections(custom_metrics: dict[str, Any], assignments: list[str] | None) -> None:
+    """Apply NAME=SECTION assignments (NAME is a metric's label or key) to custom metric definitions."""
+
+    if not assignments:
+        return
+    definitions = custom_metrics.get("definitions") or []
+    for raw in assignments:
+        name, sep, section = str(raw).partition("=")
+        name, section = name.strip(), section.strip()
+        if not sep or not name or not section:
+            raise ValueError(f"--custom-roi-metric-section expects NAME=SECTION, got {raw!r}.")
+        if section not in CUSTOM_METRIC_SECTIONS:
+            raise ValueError(
+                f"Unknown section {section!r} for custom metric {name!r}; choose one of {', '.join(CUSTOM_METRIC_SECTIONS)}."
+            )
+        matches = [d for d in definitions if d.get("label") == name or d.get("key") == name]
+        if not matches:
+            available = ", ".join(str(d.get("label")) for d in definitions) or "none loaded"
+            raise ValueError(f"No custom ROI metric named {name!r} to assign a section to (available: {available}).")
+        for definition in matches:
+            definition["section"] = section
+
+
+def _load_filter_settings(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Load filter/sorting settings exported from the reviewer (JSON) or written by hand (JSON or YAML)."""
+
+    settings_path = Path(path).expanduser().resolve()
+    if not settings_path.exists():
+        raise FileNotFoundError(f"Filter settings file not found: {settings_path}")
+    text = settings_path.read_text(encoding="utf-8")
+    if settings_path.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore[import-not-found]
+        except ImportError as error:  # pragma: no cover - depends on the environment
+            raise ImportError("Reading YAML filter settings needs PyYAML (pip install pyyaml); or use JSON.") from error
+        raw = yaml.safe_load(text)
+    else:
+        raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{settings_path}: filter settings must be a mapping.")
+    filter_values = raw.get("filter", raw.get("morphology_filter"))
+    if filter_values is None:
+        meta = {"format", "name", "session", "saved_at", "sort", "target_structure", "preset_name", "filter_set"}
+        filter_values = {key: value for key, value in raw.items() if key not in meta}
+    if not isinstance(filter_values, dict):
+        raise ValueError(f"{settings_path}: 'filter' must be a mapping of threshold names to values.")
+    name = str(raw.get("name") or raw.get("preset_name") or raw.get("filter_set") or settings_path.stem).strip()
+    sort = raw.get("sort")
+    if sort is not None:
+        if not isinstance(sort, dict):
+            raise ValueError(f"{settings_path}: 'sort' must be a mapping with 'metrics' and 'direction'.")
+        metrics = sort.get("metrics", ["original"])
+        if isinstance(metrics, str):
+            metrics = [metrics]
+        direction = str(sort.get("direction", "asc")).lower()
+        if direction not in {"asc", "desc"}:
+            raise ValueError(f"{settings_path}: sort direction must be 'asc' or 'desc', got {direction!r}.")
+        sort = {"metrics": [str(metric) for metric in metrics], "direction": direction}
+    return {"name": name, "filter": filter_values, "sort": sort, "source": str(settings_path)}
+
+
+def _apply_filter_settings(payload: dict[str, Any], settings: dict[str, Any]) -> None:
+    """Embed loaded filter/sorting settings as the reviewer's opening filter set and sort order."""
+
+    presets = dict(payload.get("customMorphologyPresets") or {})
+    presets[settings["name"]] = settings["filter"]
+    payload["customMorphologyPresets"] = presets
+    payload["initialFilterSet"] = settings["name"]
+    payload["initialMorphologyFilter"] = settings["filter"]
+    if settings.get("sort") is not None:
+        payload["initialSort"] = settings["sort"]
+    payload["filterSettingsSource"] = settings.get("source")
+
+
+def _rebuild_reviewer_html(
+    html_path: Path,
+    *,
+    input_layout_name: str,
+    target_structure: str | None,
+    custom_roi_metrics: list[str | os.PathLike[str]] | None,
+    custom_roi_metric_sections: list[str] | None,
+    filter_settings: dict[str, Any] | None,
+) -> None:
+    """--html-only: rebuild an existing reviewer from its own embedded data and the current template."""
+
+    payload = _extract_reviewer_payload(html_path)
+    if ROI_INDEX_LABEL != _DEFAULT_ROI_INDEX_LABEL or not payload.get("roiIndexLabel"):
+        payload["roiIndexLabel"] = ROI_INDEX_LABEL  # only when --roi-index-label was given
+    payload["morphologyPresets"] = _morphology_preset_payload()
+    layout_name = str(payload.get("inputLayout") or input_layout_name)
+    payload["inputLayout"] = layout_name
+    if target_structure:
+        payload["targetStructure"] = target_structure
+    if custom_roi_metrics:
+        payload["customRoiMetrics"] = _load_custom_roi_metrics(
+            custom_roi_metrics, int(payload["nRois"]), np.asarray(payload["suite2pIndices"], dtype=np.int64)
+        )
+        for definition in payload["customRoiMetrics"].get("definitions", []):
+            definition.setdefault("origin", "command line")
+    _assign_custom_metric_sections(payload.get("customRoiMetrics") or {}, custom_roi_metric_sections)
+    if filter_settings is not None:
+        _apply_filter_settings(payload, filter_settings)
+    for mode_key, name_key in (("dffStorageMode", "dffSidecarName"), ("oasisStorageMode", "oasisSidecarName")):
+        sidecar = payload.get(name_key)
+        if payload.get(mode_key) == "file" and sidecar and not (html_path.parent / sidecar).exists():
+            print(f"warning: {sidecar} is not beside {html_path.name}; the rebuilt reviewer will ask for it.")
+    _render_reviewer_html(html_path, payload, input_layout_name=layout_name)
+
+
 def _write_html(
     output_path: Path,
     *,
@@ -1754,6 +2037,7 @@ def _write_html(
     oasis_storage_mode: str,
     oasis_sidecar_name: str | None,
     initialize_labels_from_roi_model_scores: bool = False,
+    filter_settings: dict[str, Any] | None = None,
 ) -> None:
     rois = _roi_table(stat, mask, n_rois)
     red_available = mean_red is not None
@@ -1825,7 +2109,24 @@ def _write_html(
         "oasisSidecarName": oasis_sidecar_name,
         "oasisEventThreshold": float(oasis_attrs.get("event_threshold", 0.05)),
         "oasisAttrs": oasis_attrs,
+        "inputLayout": input_layout_name,
     }
+    if filter_settings is not None:
+        _apply_filter_settings(payload, filter_settings)
+    _render_reviewer_html(output_path, payload, input_layout_name=input_layout_name)
+
+
+def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_layout_name: str = "suite2p") -> None:
+    """Write the reviewer page for an already-built payload.
+
+    The full build calls this from ``_write_html``; ``--html-only`` calls it with the
+    payload read back out of an existing reviewer, so the page is rebuilt from the
+    current template without recomputing any data.
+    """
+
+    session_name = str(payload["session"])
+    n_rois = int(payload["nRois"])
+    red_available = bool(payload.get("redAvailable"))
     fov_grid_class = "with-red" if red_available else "single-channel"
     fov_review_class = "with-red" if red_available else "single-channel"
     oasis_diagnostics_panel = (
@@ -1954,6 +2255,20 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .metric-histogram-panel summary {{ cursor: pointer; color: #175cd3; font-size: 14px; font-weight: 600; }}
 .metric-histogram {{ height: 92px; min-width: 180px; margin-top: 4px; }}
 .filter-subsection-title {{ margin-top: 10px; font-size: 15px; font-weight: 700; color: #344054; }}
+.custom-metric-header {{ grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 14px; color: #344054; }}
+.custom-metric-header label {{ display: flex; gap: 6px; align-items: center; }}
+.custom-metric-header select {{ width: auto; }}
+.custom-metric-slot:empty {{ display: none; }}
+.info-example {{ margin: 4px 0 6px; padding: 6px 8px; background: #fff; border: 1px solid #e4e7ec; border-radius: 4px; font-size: 13px; white-space: pre; overflow-x: auto; }}
+.range-label-controls {{ display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 8px; font-size: 14px; color: #475467; }}
+.range-label-controls input[type=text], .range-label-controls select {{ display: block; margin-top: 3px; }}
+.range-label-controls .inline-check {{ display: flex; gap: 6px; align-items: center; }}
+.range-label-rows {{ display: grid; gap: 6px; margin-top: 8px; }}
+.range-label-row {{ display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(90px, auto) auto; gap: 8px; align-items: end; font-size: 14px; color: #475467; }}
+.range-label-row input, .range-label-row select {{ display: block; width: 100%; margin-top: 3px; box-sizing: border-box; }}
+.range-label-row .range-count {{ color: #667085; font-size: 13px; padding-bottom: 6px; }}
+.range-label-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
+.labeler-keys {{ font-size: 14px; }}
 .source-heading {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
 .filter-summary {{ color: #475467; font-size: 15px; }}
 .dialog-actions {{ display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }}
@@ -2057,75 +2372,101 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
     </div>
     <div class="dialog-section">
       <div class="filter-summary" id="filterSummary"></div>
-      <div class="note">These preset thresholds preview pass/fail counts; labels change only when Apply Filters is clicked.</div>
+      <div class="note">The loaded filter set previews pass/fail counts; labels change only when Apply Filters is clicked.</div>
       <div class="filter-controls metric-filter-controls">
-        <label>Target structure <select id="filterPreset"></select></label>
-        <button id="resetFilter">Restore selected QC thresholds</button>
+        <label>Filter set name <select id="filterPreset"></select></label>
+        <button id="resetFilter">Restore selected filter set</button>
         <input id="presetFile" type="file" accept=".json" style="display:none;">
-        <button id="importPreset">Import QC thresholds JSON</button>
+        <button id="importPreset">Import filter set JSON</button>
       </div>
-      <div class="filter-subsection-title source-heading">
-        <span>Morphology Metrics</span>
-        <button class="info-button" type="button" data-info-target="morphologyMetricSources" aria-expanded="false">Read more</button>
+      <div class="source-heading">
+        <button class="info-button" type="button" data-info-target="filterSetHelp" aria-expanded="false">Read more: filter sets</button>
         <button class="info-button" type="button" data-info-target="metricDistributionInfo" aria-expanded="false">Distribution Plot Info</button>
-        <button class="info-button" type="button" data-info-target="metricReferenceSources" aria-expanded="false">Reference Values Info</button>
       </div>
-      <div id="morphologyMetricSources" class="info-box" hidden>
-        <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a>: <code>aspect_ratio</code> and <code>compact</code> are Suite2p ROI shape statistics.</p>
-        <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L390-L397" target="_blank" rel="noopener noreferrer">ROI area calculation code</a>: number of pixels in the Suite2p ROI mask field <code>xpix</code>.</p>
-        <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L76-L91" target="_blank" rel="noopener noreferrer">Connectivity calculation code</a>: number of 4-connected components in each ROI pixel mask.</p>
+      <div id="filterSetHelp" class="info-box" hidden>
+        <p>A <strong>filter set</strong> is a named group of threshold values for the metrics below. Choosing one fills in its thresholds, and any field can then be changed. The built-in filter sets are <code>all_rois</code> (no thresholds), <code>soma</code>, <code>dendrite</code> and <code>dendrite_relaxed</code>; filter sets you save or import are listed with "(saved)".</p>
+        <p><strong>Filters are conjunctive:</strong> an ROI passes only if it meets every threshold that is set, so all conditions are combined with AND. A blank field is not used.</p>
+        <p>Filter sets can also be loaded when the reviewer is generated: export one with <strong>Export current filter/sorting settings JSON</strong> under View and Export, then pass the file with <code>--filter-settings</code> or the <code>filter_settings</code> field of a YAML config. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/export/#saving-and-reusing-filter-and-sorting-settings" target="_blank" rel="noopener noreferrer">Saving and reusing filter and sorting settings</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Distribution plots are hidden by default. When opened, each plot shows metric values across ROIs. With no threshold values entered, vertical lines reflect the active target-structure threshold, the mean for unthresholded Suite2p fields, or the reference value for computed metrics. As threshold fields are updated the lines update to the new values.</p>
-      </div>
-      <div id="metricReferenceSources" class="info-box" hidden>
-        <p><strong>Reference values beside each field are computed from the ROIs embedded in this HTML.</strong> They describe this session's distribution so a candidate cut can be judged against it; they are not recommended thresholds.</p>
-        <p><strong>Connectivity:</strong> the reference value is the 75th percentile of connectivity values.</p>
-        <p><strong>ROI area:</strong> the reference values are the 25th and 75th percentiles across ROIs.</p>
-        <p><strong>Cell identity labels:</strong> no numeric reference value is shown; choose one or more loaded cell identities by label/value.</p>
-        <p><strong>SNR: 95/50 percentile:</strong> the reference value is the mean SNR across ROIs.</p>
-        <p><strong>SNR: CaImAn:</strong> the reference value is the mean large-transient score across ROIs.</p>
-        <p><strong>Inferred spike metrics:</strong> the SNR reference value is the mean, and the rise and decay tau reference values are the 25th and 75th percentiles.</p>
-        <p><strong>Uploaded / custom ROI metrics:</strong> the reference values are the 25th and 75th percentiles across finite ROI values.</p>
-      </div>
-      <div class="filter-controls">
-        <label>Aspect min <input id="aspectMin" type="number" step="0.01" placeholder="Not Used"></label>
-        <label>Aspect max <input id="aspectMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="aspect" data-min="aspectMin" data-max="aspectMax" aria-label="Aspect ratio distribution"></canvas></details>
-        <label>Compact min <input id="compactMin" type="number" step="0.01" placeholder="Not Used"></label>
-        <label>Compact max <input id="compactMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="compact" data-min="compactMin" data-max="compactMax" aria-label="Compactness distribution"></canvas></details>
-        <label>Connectivity max <span class="threshold-default" id="maxConnectDefault"></span><input id="maxConnect" type="number" min="0" step="1" placeholder="Not Used"></label>
-        <span></span>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="connectivity" data-max="maxConnect" aria-label="Connectivity distribution"></canvas></details>
-        <label>ROI area min (px) <span class="threshold-default" id="roiAreaMinDefault"></span><input id="roiAreaMin" type="number" min="0" step="1" placeholder="Not Used"></label>
-        <label>ROI area max (px) <span class="threshold-default" id="roiAreaMaxDefault"></span><input id="roiAreaMax" type="number" min="0" step="1" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="roi_area" data-min="roiAreaMin" data-max="roiAreaMax" aria-label="ROI area distribution"></canvas></details>
+        <p>The plot beside each metric's threshold fields is a histogram of that metric across all ROIs in this session, over its 1st to 99th percentile range. Plots are shown by default; click <strong>Distribution</strong> above a plot to hide it.</p>
+        <p>Vertical lines mark the thresholds, green for the minimum and red for the maximum, and they move as you type. If no threshold values are entered, the lines reflect the thresholds in the loaded filter set. If no filter set is loaded, or the loaded one has no value for a metric, starting values are used instead: the mean for skew, aspect ratio, compactness, both SNRs, inferred spike SNR and the model score minimum; the 25th and 75th percentiles for ROI area, inferred spike rise and decay tau and uploaded ROI metrics; and the 75th percentile for connectivity and the model score maximum. The value in parentheses beside a field is the one its line uses.</p>
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Cell Identity Labels</span>
         <button class="info-button" type="button" data-info-target="cellTypeMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="cellTypeMetricSources" class="info-box" hidden>
-        <p>Cell identity labels can be loaded from pipeline outputs or uploaded as a table. Use columns <code>category_code</code> and <code>category_label</code>, or legacy columns <code>cell_type_code</code> and <code>cell_type_label</code>. Optional <code>suite2p_index</code>, <code>roi</code>, or <code>index</code> maps rows by original ROI index.</p>
+        <p><strong>Cell identity labels:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon). Check one or more identities below to keep only ROIs with those labels; if none are checked, this filter is not used.</p>
+        <p>Labels are read from the session's pipeline outputs when present, or uploaded as a CSV file with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. The CSV has a header row and one row per ROI, for example:</p>
+        <pre class="info-example">suite2p_index,cell_identity_code,cell_identity_label
+0,1,inhibitory
+1,-1,excitatory
+2,1,inhibitory</pre>
+        <p><code>suite2p_index</code> is the ROI's 0-based original index (<code>roi</code>, <code>roi_index</code> or <code>index</code> also work); without an index column, row <em>k</em> is ROI <em>k</em> and the file needs one row per ROI. Give an integer code column, a name column, or both: <code>cell_identity_code</code> and <code>cell_identity_label</code> (<code>category_code</code>/<code>category_label</code> and the legacy <code>cell_type_code</code>/<code>cell_type_label</code> are also accepted). TSV, TXT and JSON (a list of row objects with the same keys) work too.</p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
         <span class="note">No cell identity labels loaded.</span>
       </div>
       <div class="filter-subsection-title source-heading">
-        <span>Model Derived Metrics</span>
+        <span>Model-Derived Metrics</span>
         <button class="info-button" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
         <p>ROI model score probability is the trained classifier output for <code>p(good ROI)</code>, loaded from <code>roi_model_scores.h5</code> when available.</p>
         <p>The currently registered trained model is intended for cerebellar dendrite ROIs only; use it as a target-specific suggestion, not a general ROI quality score for other structures.</p>
         <p>By default, these scores are suggestions for filtering/sorting and do not label ROIs on page load. If the summary was generated with label initialization enabled, probability greater than or equal to the good threshold opens as <strong>Good</strong>, probability less than or equal to the bad threshold opens as <strong>Bad</strong>, and probabilities between those thresholds open as <strong>Unsure</strong>.</p>
+        <p>To label ROIs from score ranges in the open reviewer, use <strong>Assign Labels to Metric Ranges</strong> below.</p>
       </div>
       <div class="filter-controls">
         <label>ROI model score probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
         <label>ROI model score probability max <span class="threshold-default" id="roiModelScoreProbabilityMaxDefault"></span><input id="roiModelScoreProbabilityMax" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" data-max="roiModelScoreProbabilityMax" aria-label="ROI model score probability distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" data-max="roiModelScoreProbabilityMax" aria-label="ROI model score probability distribution"></canvas></details>
       </div>
+      <div class="filter-controls custom-metric-slot" data-section="model_derived"></div>
+      <div class="filter-subsection-title source-heading">
+        <span>Uploaded ROI Metrics</span>
+        <button class="info-button" type="button" data-info-target="customMetricSources" aria-expanded="false">Read more</button>
+      </div>
+      <div id="customMetricSources" class="info-box" hidden>
+        <p>Uploaded ROI metrics are your own per-ROI values: files given with <code>--custom-roi-metrics</code> when the reviewer is generated, or QC metric files uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. A CSV has a header row, one row per ROI and one column per metric, for example:</p>
+        <pre class="info-example">suite2p_index,local_contrast,tdtomato_intensity
+0,0.82,1530
+1,0.41,212</pre>
+        <p>Every column other than the optional index column (<code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code> or <code>index</code>) becomes a metric named after its header; without an index column, row <em>k</em> is ROI <em>k</em>. JSON may be an object of metric arrays (<code>{{"metric_name": [one value per ROI]}}</code>) or a list of row objects.</p>
+        <p><strong>Section:</strong> an uploaded metric stays in this section unless you move it with its <strong>Section</strong> menu, which can place it under any section of this menu and the matching group of the Sort menu. The section can also be set when the reviewer is generated, with <code>--custom-roi-metric-section NAME=SECTION</code> or the <code>custom_roi_metric_sections</code> field of a YAML config. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/cli-mapping/#uploaded-metrics-and-their-sections" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
+      </div>
+      <div class="filter-controls">
+        <span id="customMetricStatus" class="note"></span>
+      </div>
+      <div id="customMetricFilterControls" class="filter-controls custom-metric-slot" data-section="uploaded"></div>
+      <div class="filter-subsection-title source-heading">
+        <span>Morphology Metrics</span>
+        <button class="info-button" type="button" data-info-target="morphologyMetricSources" aria-expanded="false">Read more</button>
+      </div>
+      <div id="morphologyMetricSources" class="info-box" hidden>
+        <p><strong>ROI area calculation:</strong> the number of pixels in the ROI's mask, each pixel counted once whatever its weight. For Suite2p ROIs these are the pixels listed in <code>stat.npy</code> (<code>xpix</code>), including any that Suite2p's soma crop leaves out of its shape statistics. For masks from other software they are the pixels carrying the ROI's label in a dense label mask, or its nonzero pixels in a sparse spatial-component matrix.</p>
+        <p><strong>Aspect ratio calculation:</strong> Suite2p's <code>aspect_ratio</code>. A two-dimensional Gaussian is fitted to the ROI's weighted pixels (only the soma-cropped pixels when Suite2p's <code>soma_crop</code> option is on, the default), and the ratio is 2&nbsp;&times;&nbsp;r<sub>major</sub>&nbsp;/&nbsp;(r<sub>major</sub>&nbsp;+&nbsp;r<sub>minor</sub>&nbsp;+&nbsp;0.01) from the radii of the fitted ellipse: about 1 for a round ROI, approaching 2 for a very elongated one.</p>
+        <p><strong>Compactness calculation:</strong> Suite2p's <code>compact</code>: the mean distance of the ROI's (soma-cropped) pixels from their median position, divided by the mean distance for an ideal disk with the same number of pixels, with a minimum of 1. A disk scores 1 and less compact shapes score higher.</p>
+        <p>For Suite2p ROIs both values are read from <code>stat.npy</code>. For masks from other software the generator computes them the same way, with the same soma crop; a binary label mask gives every pixel the same weight, whereas Suite2p ROIs and sparse spatial components carry per-pixel weights, so values for binary masks are close to but not identical with what Suite2p would report. An external <code>stat.npy</code> keeps the values it has.</p>
+        <p><strong>Connectivity calculation:</strong> Counts the number of separate groups of connected pixels in each ROI mask. Fragmented ROIs (with multiple disconnected pixel groups) may indicate poor ROI segmentation.</p>
+        <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a></p>
+      </div>
+      <div class="filter-controls">
+        <label>Aspect min <span class="threshold-default" id="aspectMinDefault"></span><input id="aspectMin" type="number" step="0.01" placeholder="Not Used"></label>
+        <label>Aspect max <span class="threshold-default" id="aspectMaxDefault"></span><input id="aspectMax" type="number" step="0.01" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="aspect" data-min="aspectMin" data-max="aspectMax" aria-label="Aspect ratio distribution"></canvas></details>
+        <label>Compact min <span class="threshold-default" id="compactMinDefault"></span><input id="compactMin" type="number" step="0.01" placeholder="Not Used"></label>
+        <label>Compact max <span class="threshold-default" id="compactMaxDefault"></span><input id="compactMax" type="number" step="0.01" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="compact" data-min="compactMin" data-max="compactMax" aria-label="Compactness distribution"></canvas></details>
+        <label>Connectivity max <span class="threshold-default" id="maxConnectDefault"></span><input id="maxConnect" type="number" min="0" step="1" placeholder="Not Used"></label>
+        <span></span>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="connectivity" data-max="maxConnect" aria-label="Connectivity distribution"></canvas></details>
+        <label>ROI area min (px) <span class="threshold-default" id="roiAreaMinDefault"></span><input id="roiAreaMin" type="number" min="0" step="1" placeholder="Not Used"></label>
+        <label>ROI area max (px) <span class="threshold-default" id="roiAreaMaxDefault"></span><input id="roiAreaMax" type="number" min="0" step="1" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_area" data-min="roiAreaMin" data-max="roiAreaMax" aria-label="ROI area distribution"></canvas></details>
+      </div>
+      <div class="filter-controls custom-metric-slot" data-section="morphology"></div>
       <div class="filter-subsection-title source-heading">
         <span>Fluorescence Trace Metrics</span>
         <button class="info-button" type="button" data-info-target="fluorescenceMetricSources" aria-expanded="false">Read more</button>
@@ -2136,16 +2477,17 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a>: exceptional-event score where larger values indicate stronger large-transient structure.</p>
       </div>
       <div class="filter-controls">
-        <label>Skew min <input id="skewMin" type="number" step="0.01" placeholder="Not Used"></label>
-        <label>Skew max <input id="skewMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="skew" data-min="skewMin" data-max="skewMax" aria-label="Skew distribution"></canvas></details>
+        <label>Skew min <span class="threshold-default" id="skewMinDefault"></span><input id="skewMin" type="number" step="0.01" placeholder="Not Used"></label>
+        <label>Skew max <span class="threshold-default" id="skewMaxDefault"></span><input id="skewMax" type="number" step="0.01" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="skew" data-min="skewMin" data-max="skewMax" aria-label="Skew distribution"></canvas></details>
         <label>SNR: 95/50 percentile min <span class="threshold-default" id="eventSnrDefault"></span><input id="eventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="snr_95_50" data-min="eventSnrMin" aria-label="SNR 95/50 percentile distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="snr_95_50" data-min="eventSnrMin" aria-label="SNR 95/50 percentile distribution"></canvas></details>
         <label>SNR: CaImAn (large-transient score) min <span class="threshold-default" id="andreaPostdocSnrDefault"></span><input id="andreaPostdocSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="andrea_postdoc_snr" data-min="andreaPostdocSnrMin" aria-label="CaImAn SNR distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="andrea_postdoc_snr" data-min="andreaPostdocSnrMin" aria-label="CaImAn SNR distribution"></canvas></details>
       </div>
+      <div class="filter-controls custom-metric-slot" data-section="fluorescence"></div>
       <div class="filter-subsection-title source-heading">
         <span>Inferred Spike Metrics</span>
         <button class="info-button" type="button" data-info-target="inferredSpikeMetricSources" aria-expanded="false">Read more</button>
@@ -2158,40 +2500,51 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls">
         <label>Inferred spike SNR min <span class="threshold-default" id="oasisEventSnrDefault"></span><input id="oasisEventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="oasis_event_snr" data-min="oasisEventSnrMin" aria-label="Inferred spike SNR distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_event_snr" data-min="oasisEventSnrMin" aria-label="Inferred spike SNR distribution"></canvas></details>
         <label>Inferred spike rise tau min (s) <span class="threshold-default" id="oasisRiseTauMinDefault"></span><input id="oasisRiseTauMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Inferred spike rise tau max (s) <span class="threshold-default" id="oasisRiseTauMaxDefault"></span><input id="oasisRiseTauMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="oasis_rise_tau_seconds" data-min="oasisRiseTauMin" data-max="oasisRiseTauMax" aria-label="Inferred spike rise tau distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_rise_tau_seconds" data-min="oasisRiseTauMin" data-max="oasisRiseTauMax" aria-label="Inferred spike rise tau distribution"></canvas></details>
         <label>Inferred spike decay tau min (s) <span class="threshold-default" id="oasisDecayTauMinDefault"></span><input id="oasisDecayTauMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Inferred spike decay tau max (s) <span class="threshold-default" id="oasisDecayTauMaxDefault"></span><input id="oasisDecayTauMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel"><summary>Show distribution</summary><canvas class="metric-histogram" data-metric="oasis_decay_tau_seconds" data-min="oasisDecayTauMin" data-max="oasisDecayTauMax" aria-label="Inferred spike decay tau distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_decay_tau_seconds" data-min="oasisDecayTauMin" data-max="oasisDecayTauMax" aria-label="Inferred spike decay tau distribution"></canvas></details>
       </div>
+      <div class="filter-controls custom-metric-slot" data-section="inferred_spike"></div>
       <div class="filter-subsection-title source-heading">
-        <span>Uploaded / Custom ROI Metrics</span>
-        <button class="info-button" type="button" data-info-target="customMetricSources" aria-expanded="false">Read more</button>
+        <span>Assign Labels to Metric Ranges</span>
+        <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
       </div>
-      <div id="customMetricSources" class="info-box" hidden>
-        <p>Custom ROI metrics can be embedded during summary generation or uploaded here as CSV/TSV/JSON. Each metric must have one numeric value per ROI. Files may include a <code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code>, or <code>index</code> column to map rows by original ROI index; otherwise rows are assumed to be in the current ROI order.</p>
-        <p>CSV/TSV columns other than the optional index column become metric names. JSON may be an object of <code>{{"metric_name": [values...]}}</code> or a list of row objects.</p>
+      <div id="rangeLabelHelp" class="info-box" hidden>
+        <p>Labels every ROI whose value of one metric falls in a range you set: for example good for a model score probability of 0.85 or more, bad for 0.15 or less and unsure in between (<strong>Use model score thresholds</strong> fills in exactly these, from the thresholds stored with the scores).</p>
+        <p>Each range needs a minimum, a maximum or both. A blank side is open, so a range with only a minimum covers every value at or above it. Both bounds are inclusive. Ranges are checked from the top and an ROI takes the first one it falls in; ROIs outside every range, or with no value for the metric, are left unchanged.</p>
+        <p><strong>Good/bad/unsure labels</strong> sets the review labels directly, as the G/B/U keys do. <strong>New variable</strong> instead adds an uploaded ROI metric with the name you give, whose value is the number of the matching range (1 for the first, 2 for the second, and so on; blank outside every range), and keeps each range's name for the exported spreadsheet. It can then be filtered, sorted and exported like any other metric. Neither option depends on the threshold filters above or needs Apply Filters.</p>
       </div>
-      <div class="filter-controls">
-        <span id="customMetricStatus" class="note"></span>
+      <div class="range-label-controls">
+        <label>Metric <select id="rangeLabelMetric"></select></label>
+        <label>Assign <select id="rangeLabelMode"><option value="gbu">Good/bad/unsure labels</option><option value="variable">New variable</option></select></label>
+        <label id="rangeLabelVariableNameLabel" hidden>Variable name <input id="rangeLabelVariableName" type="text" placeholder="e.g. score_class"></label>
+        <label id="rangeLabelOnlyUnlabeledLabel" class="inline-check"><input id="rangeLabelOnlyUnlabeled" type="checkbox"> Only change ROIs that are not labeled</label>
       </div>
-      <div id="customMetricFilterControls" class="filter-controls"></div>
-      <div class="filter-subsection-title">Save QC Thresholds</div>
+      <div id="rangeLabelRows" class="range-label-rows"></div>
+      <div class="range-label-actions">
+        <button id="addRangeLabelRow" type="button">Add range</button>
+        <button id="fillModelRanges" type="button">Use model score thresholds</button>
+        <button id="applyRangeLabels" type="button">Assign labels</button>
+      </div>
+      <div id="rangeLabelStatus" class="note"></div>
+      <div class="filter-subsection-title">Save Filter Sets</div>
       <div class="source-heading">
-        <span class="note">Save the current filter values for reuse or export/import them for another session.</span>
+        <span class="note">Save the current thresholds as a named filter set for reuse, or keep it in a copy of this HTML.</span>
         <button class="info-button" type="button" data-info-target="saveFiltersHelp" aria-expanded="false">Read more</button>
       </div>
       <div id="saveFiltersHelp" class="info-box" hidden>
-        <p><strong>Save new QC thresholds:</strong> saves the current threshold settings as a named filter inside the currently open reviewer session, so it appears in the target-structure dropdown during this browser session.</p>
-        <p><strong>Save QC thresholds into HTML:</strong> downloads a new HTML copy with the current thresholds embedded, so reopening that HTML later preserves them.</p>
-        <p><strong>Import QC thresholds JSON:</strong> loads a previously exported threshold JSON file into this reviewer.</p>
+        <p><strong>Save new filter set:</strong> saves the current thresholds under the name you enter, inside the open reviewer, so it appears in the Filter set name list until the page is closed.</p>
+        <p><strong>Save filter set into HTML:</strong> saves it the same way, then downloads a copy of this HTML with it, the current labels and the current sort order embedded, so reopening that copy keeps them.</p>
+        <p><strong>Import filter set JSON:</strong> loads a file exported with <strong>Export current filter/sorting settings JSON</strong>, including its sort order.</p>
       </div>
       <div class="filter-controls">
-        <label>Custom filter name <input id="presetName" type="text" placeholder="my filters"></label>
-        <button id="savePreset">Save new QC thresholds</button>
-        <button id="savePresetHtml">Save QC thresholds into HTML</button>
+        <label>New filter set name <input id="presetName" type="text" placeholder="my filter set"></label>
+        <button id="savePreset">Save new filter set</button>
+        <button id="savePresetHtml">Save filter set into HTML</button>
       </div>
     </div>
     <div class="dialog-actions">
@@ -2209,9 +2562,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
     </div>
     <div id="sortMetricSources" class="info-box" hidden>
       <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a>: Suite2p-provided fields include ROI shape metrics, detection/template fields, and trace activity fields.</p>
-      <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L76-L91" target="_blank" rel="noopener noreferrer">Connectivity calculation code</a>: number of 4-connected components in each ROI pixel mask.</p>
-      <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L390-L397" target="_blank" rel="noopener noreferrer">ROI area calculation code</a>: number of pixels in the Suite2p ROI mask field <code>xpix</code>.</p>
-      <p>Cell identity code comes from loaded anatomical-channel label outputs or an uploaded table. Legacy cell-type files use <code>-1</code> excitatory/non-red, <code>0</code> unsure, and <code>1</code> inhibitory/red; other uploaded categorical variables may use any numeric codes with labels supplied by the file.</p>
+      <p><strong>Connectivity:</strong> the number of separate groups of connected pixels in each ROI mask. <strong>ROI area:</strong> the number of pixels in the ROI mask. The Read more beside Morphology Metrics in the Filter menu gives the full calculations, for Suite2p ROIs and for masks from other software.</p>
+      <p>Cell identity code comes from loaded anatomical-channel label outputs or an uploaded CSV. Legacy cell-type files use <code>-1</code> excitatory/non-red, <code>0</code> unsure, and <code>1</code> inhibitory/red; other uploaded cell identity labels may use any integer codes, with names supplied by the file.</p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L122-L158" target="_blank" rel="noopener noreferrer">SNR: 95/50 percentile calculation code</a></p>
       <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a></p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L470-L556" target="_blank" rel="noopener noreferrer">Inferred spike metric calculation code</a>: metrics are calculated from thresholded inferred-spike amplitude windows.</p>
@@ -2222,23 +2574,27 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div class="note">Check one or more metrics. Multiple checked metrics are converted to 0-1 normalized values and summed with equal weight.</div>
         <div id="sortMetricList" class="sort-metric-list">
           <label><input type="checkbox" name="sortMetric" value="original" checked> <span class="roi-index-label">Original Suite2p index</span></label>
+          <div class="sort-metric-group">Model-Derived Metrics</div>
+          <label><input type="checkbox" name="sortMetric" value="roi_model_score_probability"> ROI model score probability</label>
+          <div class="custom-sort-slot" data-section="model_derived"></div>
           <div class="sort-metric-group">Morphology Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="aspect"> Aspect ratio</label>
           <label><input type="checkbox" name="sortMetric" value="compact"> Compactness</label>
           <label><input type="checkbox" name="sortMetric" value="roi_area"> ROI area (px)</label>
           <label><input type="checkbox" name="sortMetric" value="connectivity"> Connectivity</label>
+          <div class="custom-sort-slot" data-section="morphology"></div>
           <div class="sort-metric-group">Cell Identity Labels</div>
           <label><input type="checkbox" name="sortMetric" value="cell_type_code"> Cell identity code</label>
           <div class="sort-metric-group">Fluorescence Trace Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="skew"> Skew</label>
           <label><input type="checkbox" name="sortMetric" value="snr_95_50"> SNR: 95/50 percentile</label>
           <label><input type="checkbox" name="sortMetric" value="andrea_postdoc_snr"> SNR: CaImAn (large-transient score)</label>
+          <div class="custom-sort-slot" data-section="fluorescence"></div>
           <div class="sort-metric-group">Inferred Spike Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="oasis_event_snr"> Inferred spike SNR</label>
           <label><input type="checkbox" name="sortMetric" value="oasis_rise_tau_seconds"> Inferred spike rise tau</label>
           <label><input type="checkbox" name="sortMetric" value="oasis_decay_tau_seconds"> Inferred spike decay tau</label>
-          <div class="sort-metric-group">Model Derived Metrics</div>
-          <label><input type="checkbox" name="sortMetric" value="roi_model_score_probability"> ROI model score probability</label>
+          <div class="custom-sort-slot" data-section="inferred_spike"></div>
           <div id="customSortMetrics"></div>
         </div>
       </div>
@@ -2266,12 +2622,12 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <p><strong>Save current state into HTML:</strong> downloads a reviewed HTML copy that preserves labels and custom filters inside the file.</p>
       <p><strong>Export metric spreadsheet CSV:</strong> saves one row per ROI with code-friendly column names, current labels, ROI metrics, filter failures, and exclusion reasons.</p>
       <p><strong>Export labels NPY:</strong> saves <code>roi_manual_labels.npy</code>, a one-dimensional NumPy label array with one row per original Suite2p ROI: <code>NaN</code> not labeled, <code>0</code> bad, <code>1</code> good, and <code>2</code> unsure.</p>
-      <p><strong>Export QC thresholds JSON:</strong> saves the current ROI metric thresholds/filter settings for reuse or documentation.</p>
+      <p><strong>Export current filter/sorting settings JSON:</strong> saves the current thresholds, with the filter set name and the current sort order, for reuse or documentation.</p>
     </div>
     <div class="save-options">
       <div class="save-option">
         <button id="saveHtmlWithLabels">Save current state into HTML</button>
-        <span class="note">Use this to save the current state (labels, QC thresholds) of the .html to return to after closing the browser.</span>
+        <span class="note">Use this to save the current state (labels, filter and sorting settings) of the .html to return to after closing the browser.</span>
       </div>
       <div class="save-option">
         <button id="saveMetricSpreadsheet">Export metric spreadsheet CSV</button>
@@ -2282,10 +2638,10 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <span class="note">Exports a one-dimensional label array indexed by original Suite2p ROI.</span>
       </div>
       <div class="save-option">
-        <button id="saveCurrentFilters">Export QC thresholds JSON</button>
-        <span class="note">Exports the current ROI metric thresholds so they can be reused or documented.</span>
+        <button id="saveCurrentFilters">Export current filter/sorting settings JSON</button>
+        <span class="note">Exports the current thresholds, filter set name and sort order. Load them again with <strong>Import filter set JSON</strong> in the Filter menu, or when generating a reviewer with <code>--filter-settings</code> or a YAML config's <code>filter_settings</code> field. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/export/#saving-and-reusing-filter-and-sorting-settings" target="_blank" rel="noopener noreferrer">How to load filter/sorting settings</a></span>
       </div>
-      <a class="docs-link" href="https://najafi-laboratory.github.io/2p_imaging/roi-reviewer-exports/#2-export-format-and-downstream-use" target="_blank" rel="noopener noreferrer">Output format details</a>
+      <a class="docs-link" href="https://najafi-laboratory.github.io/2p_imaging/roi-reviewer-exports/#export-format-and-downstream-use" target="_blank" rel="noopener noreferrer">Output format details</a>
     </div>
     <div class="dialog-actions"><button id="closeSaveLabelsDialog" type="button">Close</button></div>
   </dialog>
@@ -2444,7 +2800,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             <summary>Labeler</summary>
             <div class="menu-card-content">
             <span id="labelCounts"></span>
-            <span class="note">Keyboard: G/B/U/N label; left/right arrows select the previous/next visible ROI.</span>
+            <strong class="labeler-keys">Left/right arrows select the previous/next visible ROI.</strong>
+            <span class="note">Keyboard: G/B/U/N label.</span>
             <strong>Manually label filtered ROIs</strong>
             <label>Selected ROI (<span class="roi-index-label">Suite2p Original Index</span>) <input id="roiInput" type="number" min="0" value="0"> <span id="selectedSortPosition" class="note"></span></label>
             <button class="info-button" type="button" data-info-target="roiIndexHelp" aria-expanded="false">Read more</button>
@@ -2483,9 +2840,9 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             </div>
           </details>
           <details class="panel label-controls menu-card" open>
-            <summary>Export</summary>
+            <summary>View and Export</summary>
             <div class="menu-card-content">
-            <button id="openExclusions">Open ROI metric spreadsheet</button>
+            <button id="openExclusions">View ROI metric spreadsheet</button>
             <button id="openSaveLabelsDialog" type="button">Save Labels</button>
             </div>
           </details>
@@ -2535,6 +2892,7 @@ if (redImage && data.redAvailable) redImage.src = data.red;
 document.querySelectorAll(".imagewrap img").forEach(img => img.addEventListener("load", syncControlColumnHeight));
 document.querySelectorAll(".overlay").forEach(svg => svg.setAttribute("viewBox", `0 0 ${{data.imageWidth}} ${{data.imageHeight}}`));
 function targetStructureLabel(name) {{
+  if (name === "all_rois") return "all_rois (no thresholds)";
   if (name === "neuron") return "soma";
   if (name === "cerebellum_lax") return "dendrite_relaxed";
   return name;
@@ -2686,7 +3044,7 @@ function renderAutoLoadedFileList() {{
   const items = [];
   const originText = origin => origin === "upload" ? "uploaded in this menu" : "command line (--custom-roi-metrics)";
   for (const definition of customMetricDefinitions()) {{
-    if (!definition.origin) continue;
+    if (definition.origin !== "upload" && definition.origin !== "command line") continue;
     items.push(`Custom ROI metric "${{definition.label}}": ${{definition.source || "unnamed file"}} (${{originText(definition.origin)}})`);
   }}
   if (data.cellTypeLabelOrigin === "upload" && data.cellTypeLabelSource) items.push(`Cell identity labels: ${{data.cellTypeLabelSource}} (${{originText("upload")}})`);
@@ -2979,7 +3337,6 @@ function loadCustomMetricText(text, sourceName) {{
   updateMetricDefaults();
   evaluateFilter();
   updateSortMetricHandlers();
-  document.getElementById("customMetricStatus").textContent = `${{data.customRoiMetrics.definitions.length}} custom metric(s) loaded.`;
   renderAutoLoadedFileList();
 }}
 function categoryCodeFromLabel(label, labelToCode) {{
@@ -3003,12 +3360,12 @@ function loadCategoryRows(rowObjects, sourceName) {{
   const headers = Array.from(new Set(rowObjects.flatMap(row => Object.keys(row))));
   const lowerHeaders = headers.map(value => value.toLowerCase());
   let codeHeader = null;
-  for (const name of ["category_code", "cell_type_code", "code"]) {{
+  for (const name of ["cell_identity_code", "category_code", "cell_type_code", "code"]) {{
     const found = lowerHeaders.indexOf(name);
     if (found >= 0) {{ codeHeader = headers[found]; break; }}
   }}
   let labelHeader = null;
-  for (const name of ["category_label", "cell_type_label", "label"]) {{
+  for (const name of ["cell_identity_label", "category_label", "cell_type_label", "label"]) {{
     const found = lowerHeaders.indexOf(name);
     if (found >= 0) {{ labelHeader = headers[found]; break; }}
   }}
@@ -3017,7 +3374,7 @@ function loadCategoryRows(rowObjects, sourceName) {{
     const found = lowerHeaders.indexOf(name);
     if (found >= 0) {{ indexHeader = headers[found]; break; }}
   }}
-  if (!codeHeader && !labelHeader) throw new Error("Expected category_code/category_label keys, or legacy cell_type_code/cell_type_label keys.");
+  if (!codeHeader && !labelHeader) throw new Error("Expected cell_identity_code/cell_identity_label keys (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
   const nextLabels = new Array(data.nRois).fill(null);
   const labelMap = {{}};
   const labelToCode = new Map();
@@ -3055,15 +3412,17 @@ function loadCellTypeTableText(text, sourceName) {{
   const rows = parseDelimitedRows(text);
   if (rows.length < 2) throw new Error("Expected a header row and one row per original Suite2p ROI.");
   const headers = rows[0].map(value => value.trim().toLowerCase());
-  let codeIndex = headers.indexOf("category_code");
+  let codeIndex = headers.indexOf("cell_identity_code");
+  if (codeIndex < 0) codeIndex = headers.indexOf("category_code");
   if (codeIndex < 0) codeIndex = headers.indexOf("cell_type_code");
-  let labelIndex = headers.indexOf("category_label");
+  let labelIndex = headers.indexOf("cell_identity_label");
+  if (labelIndex < 0) labelIndex = headers.indexOf("category_label");
   if (labelIndex < 0) labelIndex = headers.indexOf("cell_type_label");
   let suite2pIndex = headers.indexOf("suite2p_index");
   if (suite2pIndex < 0) suite2pIndex = headers.indexOf("roi");
   if (suite2pIndex < 0) suite2pIndex = headers.indexOf("roi_index");
   if (suite2pIndex < 0) suite2pIndex = headers.indexOf("index");
-  if (codeIndex < 0 && labelIndex < 0) throw new Error("Expected category_code/category_label columns, or legacy cell_type_code/cell_type_label columns.");
+  if (codeIndex < 0 && labelIndex < 0) throw new Error("Expected cell_identity_code/cell_identity_label columns (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
   const nextLabels = new Array(data.nRois).fill(null);
   const labelMap = {{}};
   const labelToCode = new Map();
@@ -3121,39 +3480,79 @@ function customMetricValue(roi, key) {{
   const value = data.customRoiMetrics?.values?.[roi]?.[key];
   return value === null || value === undefined ? NaN : Number(value);
 }}
+const CUSTOM_METRIC_SECTIONS = {{
+  uploaded: "Uploaded ROI Metrics",
+  model_derived: "Model-Derived Metrics",
+  morphology: "Morphology Metrics",
+  fluorescence: "Fluorescence Trace Metrics",
+  inferred_spike: "Inferred Spike Metrics",
+}};
+function customMetricSection(definition) {{
+  return Object.prototype.hasOwnProperty.call(CUSTOM_METRIC_SECTIONS, definition?.section) ? definition.section : "uploaded";
+}}
+function customMetricSlot(section) {{
+  return document.querySelector(`.custom-metric-slot[data-section="${{section}}"]`) || document.getElementById("customMetricFilterControls");
+}}
 function renderCustomMetricControls() {{
-  const controls = document.getElementById("customMetricFilterControls");
-  controls.textContent = "";
+  const kept = readCustomMetricFiltersFromInputs();
+  document.querySelectorAll(".custom-metric-slot").forEach(slot => {{ slot.textContent = ""; }});
+  let moved = 0;
   for (const definition of customMetricDefinitions()) {{
+    const section = customMetricSection(definition);
+    if (section !== "uploaded") moved++;
+    const controls = customMetricSlot(section);
     const ids = customMetricFilterIds(definition.key);
-    const minLabel = document.createElement("label");
-    minLabel.textContent = `${{definition.label}} min `;
-    const minDefault = document.createElement("span");
-    minDefault.className = "threshold-default";
-    minDefault.id = `${{ids.min}}Default`;
-    minLabel.appendChild(minDefault);
-    const minInput = document.createElement("input");
-    minInput.id = ids.min;
-    minInput.type = "number";
-    minInput.step = "0.01";
-    minInput.placeholder = "Not Used";
-    minLabel.appendChild(minInput);
-    const maxLabel = document.createElement("label");
-    maxLabel.textContent = `${{definition.label}} max `;
-    const maxDefault = document.createElement("span");
-    maxDefault.className = "threshold-default";
-    maxDefault.id = `${{ids.max}}Default`;
-    maxLabel.appendChild(maxDefault);
-    const maxInput = document.createElement("input");
-    maxInput.id = ids.max;
-    maxInput.type = "number";
-    maxInput.step = "0.01";
-    maxInput.placeholder = "Not Used";
-    maxLabel.appendChild(maxInput);
+    const header = document.createElement("div");
+    header.className = "custom-metric-header";
+    const name = document.createElement("strong");
+    name.textContent = definition.label;
+    header.appendChild(name);
+    const sectionLabel = document.createElement("label");
+    sectionLabel.textContent = "Section";
+    const sectionSelect = document.createElement("select");
+    sectionSelect.className = "custom-metric-section";
+    for (const [value, text] of Object.entries(CUSTOM_METRIC_SECTIONS)) {{
+      const option = document.createElement("option");
+      option.value = value; option.textContent = text;
+      sectionSelect.appendChild(option);
+    }}
+    sectionSelect.value = section;
+    sectionSelect.addEventListener("change", () => {{
+      definition.section = sectionSelect.value;
+      renderCustomMetricControls();
+      renderCustomSortMetrics();
+      updateSortMetricHandlers();
+      updateMetricDefaults();
+      drawMetricHistograms();
+    }});
+    sectionLabel.appendChild(sectionSelect);
+    header.appendChild(sectionLabel);
+    if (definition.categories) {{
+      const legend = document.createElement("span");
+      legend.className = "note";
+      legend.textContent = Object.entries(definition.categories).map(([code, text]) => `${{code}} = ${{text}}`).join(", ");
+      header.appendChild(legend);
+    }}
+    const makeBound = (id, text) => {{
+      const label = document.createElement("label");
+      label.textContent = `${{definition.label}} ${{text}} `;
+      const reference = document.createElement("span");
+      reference.className = "threshold-default";
+      reference.id = `${{id}}Default`;
+      label.appendChild(reference);
+      const input = document.createElement("input");
+      input.id = id; input.type = "number"; input.step = "0.01"; input.placeholder = "Not Used";
+      const previous = kept[definition.key]?.[text];
+      if (previous !== null && previous !== undefined && Number.isFinite(previous)) input.value = previous;
+      input.addEventListener("input", () => {{ evaluateFilter(); drawMetricHistograms(); }});
+      label.appendChild(input);
+      return label;
+    }};
     const details = document.createElement("details");
     details.className = "metric-histogram-panel";
+    details.open = true;
     const summary = document.createElement("summary");
-    summary.textContent = "Show distribution";
+    summary.textContent = "Distribution";
     const canvas = document.createElement("canvas");
     canvas.className = "metric-histogram";
     canvas.dataset.metric = `custom:${{definition.key}}`;
@@ -3162,34 +3561,56 @@ function renderCustomMetricControls() {{
     canvas.setAttribute("aria-label", `${{definition.label}} distribution`);
     details.appendChild(summary);
     details.appendChild(canvas);
-    controls.appendChild(minLabel);
-    controls.appendChild(maxLabel);
-    controls.appendChild(details);
-    minInput.addEventListener("input", () => {{ evaluateFilter(); drawMetricHistograms(); }});
-    maxInput.addEventListener("input", () => {{ evaluateFilter(); drawMetricHistograms(); }});
     details.addEventListener("toggle", () => {{ if (details.open) drawMetricHistogram(canvas); }});
+    controls.appendChild(header);
+    controls.appendChild(makeBound(ids.min, "min"));
+    controls.appendChild(makeBound(ids.max, "max"));
+    controls.appendChild(details);
   }}
-  document.getElementById("customMetricStatus").textContent = customMetricDefinitions().length
-    ? `${{customMetricDefinitions().length}} custom metric(s) available.`
-    : "No custom ROI metrics loaded.";
+  const total = customMetricDefinitions().length;
+  document.getElementById("customMetricStatus").textContent = total
+    ? `${{total}} uploaded ROI metric(s) loaded${{moved ? `; ${{moved}} shown in other sections` : ""}}.`
+    : "No uploaded ROI metrics loaded.";
+  if (typeof refreshRangeMetricOptions === "function") refreshRangeMetricOptions();
+}}
+function readCustomMetricFiltersFromInputs() {{
+  const values = {{}};
+  for (const definition of customMetricDefinitions()) {{
+    const ids = customMetricFilterIds(definition.key);
+    const read = id => {{
+      const input = document.getElementById(id);
+      if (!input || String(input.value).trim() === "") return null;
+      const value = Number(input.value);
+      return Number.isFinite(value) ? value : null;
+    }};
+    values[definition.key] = {{min: read(ids.min), max: read(ids.max)}};
+  }}
+  return values;
 }}
 function renderCustomSortMetrics() {{
+  const checked = new Set(Array.from(document.querySelectorAll('input[name="sortMetric"]:checked')).map(input => input.value));
+  document.querySelectorAll(".custom-sort-slot").forEach(slot => {{ slot.textContent = ""; }});
   const container = document.getElementById("customSortMetrics");
   container.textContent = "";
-  if (!customMetricDefinitions().length) return;
-  const group = document.createElement("div");
-  group.className = "sort-metric-group";
-  group.textContent = "Uploaded / Custom ROI Metrics";
-  container.appendChild(group);
+  const uploaded = customMetricDefinitions().filter(definition => customMetricSection(definition) === "uploaded");
+  if (uploaded.length) {{
+    const group = document.createElement("div");
+    group.className = "sort-metric-group";
+    group.textContent = "Uploaded ROI Metrics";
+    container.appendChild(group);
+  }}
   for (const definition of customMetricDefinitions()) {{
+    const section = customMetricSection(definition);
+    const target = section === "uploaded" ? container : (document.querySelector(`.custom-sort-slot[data-section="${{section}}"]`) || container);
     const label = document.createElement("label");
     const input = document.createElement("input");
     input.type = "checkbox";
     input.name = "sortMetric";
     input.value = `custom:${{definition.key}}`;
+    input.checked = checked.has(input.value);
     label.appendChild(input);
     label.appendChild(document.createTextNode(` ${{definition.label}}`));
-    container.appendChild(label);
+    target.appendChild(label);
   }}
 }}
 function fit(canvas) {{
@@ -3319,34 +3740,49 @@ function updateMetricDefaults() {{
   const oasisRiseTau = finiteMetricValues("oasis_rise_tau_seconds");
   const oasisDecayTau = finiteMetricValues("oasis_decay_tau_seconds");
   const roiModelProbability = finiteMetricValues("roi_model_score_probability");
-  const selectedPreset = data.morphologyPresets[data.targetStructure] || data.morphologyPresets.all_rois || {{}};
-  setReferenceStatistic("skewMin", selectedPreset.skewMin ?? mean(skew), "preset or mean");
-  setReferenceStatistic("skewMax", selectedPreset.skewMax ?? mean(skew), "preset or mean");
-  setReferenceStatistic("aspectMin", selectedPreset.aspectMin ?? mean(aspect), "preset or mean");
-  setReferenceStatistic("aspectMax", selectedPreset.aspectMax ?? mean(aspect), "preset or mean");
-  setReferenceStatistic("compactMin", selectedPreset.compactMin ?? mean(compact), "preset or mean");
-  setReferenceStatistic("compactMax", selectedPreset.compactMax ?? mean(compact), "preset or mean");
-  setReferenceStatistic("maxConnect", percentile(connect, 0.75), "75th pct");
-  setReferenceStatistic("roiAreaMin", percentile(roiArea, 0.25), "25th pct");
-  setReferenceStatistic("roiAreaMax", percentile(roiArea, 0.75), "75th pct");
-  setReferenceStatistic("eventSnrMin", mean(snr9550), "mean");
-  setReferenceStatistic("andreaPostdocSnrMin", mean(caiman), "mean");
-  setReferenceStatistic("oasisEventSnrMin", mean(oasisSnr), "mean");
-  setReferenceStatistic("oasisRiseTauMin", percentile(oasisRiseTau, 0.25), "25th pct");
-  setReferenceStatistic("oasisRiseTauMax", percentile(oasisRiseTau, 0.75), "75th pct");
-  setReferenceStatistic("oasisDecayTauMin", percentile(oasisDecayTau, 0.25), "25th pct");
-  setReferenceStatistic("oasisDecayTauMax", percentile(oasisDecayTau, 0.75), "75th pct");
-  setReferenceStatistic("roiModelScoreProbabilityMin", mean(roiModelProbability), "mean");
-  setReferenceStatistic("roiModelScoreProbabilityMax", percentile(roiModelProbability, 0.75), "75th pct");
+  // Lines and the values in parentheses use the loaded filter set where it sets a field,
+  // and otherwise a starting statistic of this session's distribution.
+  const selectedPreset = loadedFilterSet();
+  const startFrom = (id, value, label) => {{
+    const preset = selectedPreset[id];
+    if (preset !== null && preset !== undefined && String(preset).trim() !== "" && Number.isFinite(Number(preset))) setReferenceStatistic(id, Number(preset), "filter set");
+    else setReferenceStatistic(id, value, label);
+  }};
+  startFrom("skewMin", mean(skew), "mean");
+  startFrom("skewMax", mean(skew), "mean");
+  startFrom("aspectMin", mean(aspect), "mean");
+  startFrom("aspectMax", mean(aspect), "mean");
+  startFrom("compactMin", mean(compact), "mean");
+  startFrom("compactMax", mean(compact), "mean");
+  startFrom("maxConnect", percentile(connect, 0.75), "75th pct");
+  startFrom("roiAreaMin", percentile(roiArea, 0.25), "25th pct");
+  startFrom("roiAreaMax", percentile(roiArea, 0.75), "75th pct");
+  startFrom("eventSnrMin", mean(snr9550), "mean");
+  startFrom("andreaPostdocSnrMin", mean(caiman), "mean");
+  startFrom("oasisEventSnrMin", mean(oasisSnr), "mean");
+  startFrom("oasisRiseTauMin", percentile(oasisRiseTau, 0.25), "25th pct");
+  startFrom("oasisRiseTauMax", percentile(oasisRiseTau, 0.75), "75th pct");
+  startFrom("oasisDecayTauMin", percentile(oasisDecayTau, 0.25), "25th pct");
+  startFrom("oasisDecayTauMax", percentile(oasisDecayTau, 0.75), "75th pct");
+  startFrom("roiModelScoreProbabilityMin", mean(roiModelProbability), "mean");
+  startFrom("roiModelScoreProbabilityMax", percentile(roiModelProbability, 0.75), "75th pct");
   for (const definition of customMetricDefinitions()) {{
     const values = finiteMetricValues(`custom:${{definition.key}}`);
     const ids = customMetricFilterIds(definition.key);
-    setReferenceStatistic(ids.min, percentile(values, 0.25), "25th pct");
-    setReferenceStatistic(ids.max, percentile(values, 0.75), "75th pct");
+    const presetBounds = selectedPreset.customMetrics?.[definition.key] || {{}};
+    const presetMin = Number(presetBounds.min), presetMax = Number(presetBounds.max);
+    if (presetBounds.min !== null && presetBounds.min !== undefined && Number.isFinite(presetMin)) setReferenceStatistic(ids.min, presetMin, "filter set");
+    else setReferenceStatistic(ids.min, percentile(values, 0.25), "25th pct");
+    if (presetBounds.max !== null && presetBounds.max !== undefined && Number.isFinite(presetMax)) setReferenceStatistic(ids.max, presetMax, "filter set");
+    else setReferenceStatistic(ids.max, percentile(values, 0.75), "75th pct");
     const minDefault = document.getElementById(`${{ids.min}}Default`);
     const maxDefault = document.getElementById(`${{ids.max}}Default`);
     if (minDefault) minDefault.textContent = values.length ? referenceText(ids.min) : "";
     if (maxDefault) maxDefault.textContent = values.length ? referenceText(ids.max) : "";
+  }}
+  for (const id of ["skewMin", "skewMax", "aspectMin", "aspectMax", "compactMin", "compactMax"]) {{
+    const element = document.getElementById(`${{id}}Default`);
+    if (element) element.textContent = referenceText(id);
   }}
   document.getElementById("maxConnectDefault").textContent = referenceText("maxConnect");
   document.getElementById("roiAreaMinDefault").textContent = referenceText("roiAreaMin");
@@ -3378,6 +3814,16 @@ function configureOasisFilterControls() {{
     input.placeholder = available ? "Not Used" : "No inferred spikes file detected";
     if (!available) input.value = "";
   }}
+}}
+function loadedFilterSet() {{
+  const select = document.getElementById("filterPreset");
+  const [kind, name] = String(select?.value || "").split(":", 2);
+  const preset = kind === "built-in" ? data.morphologyPresets[name] : kind === "custom" ? customPresets[name] : null;
+  return preset && typeof preset === "object" ? preset : {{}};
+}}
+function loadedFilterSetName() {{
+  const [, name] = String(document.getElementById("filterPreset")?.value || "").split(":", 2);
+  return name || "";
 }}
 function updateSuite2pPresetThresholds(filter) {{
   const fallback = {{
@@ -3416,7 +3862,7 @@ function drawMetricHistogram(canvas) {{
   const maxCount = Math.max(...counts, 1);
   const plotW = w - pad * 2, plotTop = 32 * r, plotBottom = h - pad * 1.45;
   const plotH = Math.max(1, plotBottom - plotTop);
-  ctx.fillStyle = "#dbeafe";
+  ctx.fillStyle = "#111827";
   counts.forEach((count, index) => {{
     const x = pad + index / bins * plotW;
     const bw = Math.max(1, plotW / bins - 1);
@@ -3449,7 +3895,7 @@ function drawMetricHistogram(canvas) {{
     Number.isFinite(minThreshold.value) && Number.isFinite(maxThreshold.value) &&
     Math.abs(minThreshold.value - maxThreshold.value) <= Math.max(1e-9, Math.abs(minThreshold.value) * 1e-9)
   ) {{
-    drawLine(minThreshold.value, "#475467", "mean");
+    drawLine(minThreshold.value, "#2563eb", referenceStatisticLabels[canvas.dataset.min] || "mean");
   }} else {{
     if (minThreshold) drawLine(minThreshold.value, "#16a34a", minThreshold.label);
     if (maxThreshold) drawLine(maxThreshold.value, "#dc2626", maxThreshold.label);
@@ -3511,8 +3957,8 @@ function currentSortPositionText() {{
   // Sort position is 1-based within the ROIs currently shown; the original index (0-based) is shown separately.
   const total = visibleRois.length;
   const order = `${{sortMetricText()}}, ${{sortDirectionText()}}`;
-  if (!visibleRois.includes(selected)) return `not in the current view (${{total}} shown, sorted by ${{order}})`;
-  return `sort position ${{visibleRois.indexOf(selected) + 1}} of ${{total}} (by ${{order}})`;
+  if (!visibleRois.includes(selected)) return `not in the current view (${{total}} shown, ROIs sorted by ${{order}})`;
+  return `sort position ${{visibleRois.indexOf(selected) + 1}} of ${{total}} (ROIs sorted by ${{order}})`;
 }}
 function updateSortCurrent() {{
   document.getElementById("sortCurrent").textContent = `Current order: ${{sortMetricText()}}, ${{sortDirectionText()}}`;
@@ -3808,7 +4254,7 @@ function loadSelectedPreset() {{
   const [kind, name] = document.getElementById("filterPreset").value.split(":", 2);
   const preset = kind === "built-in" ? data.morphologyPresets[name] : customPresets[name];
   if (preset) {{
-    updateSuite2pPresetThresholds(preset);
+    updateMetricDefaults();
     writeFilter(preset);
   }}
 }}
@@ -3817,15 +4263,17 @@ function currentPresetName() {{
 }}
 function saveCurrentPresetToPage() {{
   const name = currentPresetName();
-  if (!name) {{ alert("Enter a custom filter name first."); return null; }}
+  if (!name) {{ alert("Enter a filter set name first."); return null; }}
   try {{
     customPresets[name] = normalizeFilter(readFilter());
   }} catch (error) {{
-    alert(`Could not save QC thresholds: ${{error.message}}`);
+    alert(`Could not save the filter set: ${{error.message}}`);
     return null;
   }}
   populatePresetSelect(name);
   document.getElementById("filterPreset").value = `custom:${{name}}`;
+  updateMetricDefaults();
+  drawMetricHistograms();
   return name;
 }}
 function passesFilter(roi, metrics, filter) {{
@@ -3920,7 +4368,7 @@ function evaluateFilter() {{
     filterPass[roi] = passesFilter(roi, data.morphology[roi], filter) ? 1 : 0;
     pass += filterPass[roi];
   }}
-  const summary = `${{pass}} / ${{data.nRois}} original Suite2p ROIs pass the current QC metric filters.`;
+  const summary = `${{pass}} / ${{data.nRois}} original Suite2p ROIs pass the current ROI metric filters.`;
   document.getElementById("filterSummary").textContent = summary;
   document.getElementById("filterSummaryInline").textContent = summary;
   drawMetricHistograms();
@@ -5146,13 +5594,15 @@ function metricSpreadsheetRows() {{
   }});
 }}
 function metricSpreadsheetCsv(rowsData = metricSpreadsheetRows()) {{
-  const customHeaders = customMetricDefinitions().map(definition => `custom_${{definition.key}}`);
-  const csvHeader = ["suite2p_index","manual_label","category_label","category_code","roi_model_score_state","roi_model_score_probability","footprint","skew","aspect_ratio","compact","connectivity","roi_area_px","snr_95_50","caiman_exceptional_event_snr","inferred_spike_snr","inferred_spike_rise_tau_seconds","inferred_spike_decay_tau_seconds", ...customHeaders, "reason"];
+  const customHeaders = customMetricDefinitions().flatMap(definition => definition.categories ? [`custom_${{definition.key}}`, `custom_${{definition.key}}_label`] : [`custom_${{definition.key}}`]);
+  const csvHeader = ["suite2p_index","manual_label","cell_identity_label","cell_identity_code","roi_model_score_state","roi_model_score_probability","footprint","skew","aspect_ratio","compact","connectivity","roi_area_px","snr_95_50","caiman_exceptional_event_snr","inferred_spike_snr","inferred_spike_rise_tau_seconds","inferred_spike_decay_tau_seconds", ...customHeaders, "reason"];
   const csvRows = rowsData.map(row => [
     row.suite2p, row.label, row.categoryLabel, row.categoryCode ?? "", row.roiModelScoreState, fmt(row.roiModelScoreProbability), fmt(row.footprint), fmt(row.skew), fmt(row.aspect), fmt(row.compact),
     row.connectivity, fmt(row.roiArea), fmt(row.snr9550), fmt(row.postdocSnr),
     fmt(row.oasisEventSnr), fmt(row.oasisRiseTau), fmt(row.oasisDecayTau),
-    ...customMetricDefinitions().map(definition => fmt(row.customMetrics[definition.key])),
+    ...customMetricDefinitions().flatMap(definition => definition.categories
+      ? [fmt(row.customMetrics[definition.key]), customCategoryName(definition, row.customMetrics[definition.key])]
+      : [fmt(row.customMetrics[definition.key])]),
     row.reason,
   ].map(csvEscape).join(","));
   return [csvHeader.join(","), ...csvRows].join("\\n") + "\\n";
@@ -5166,7 +5616,7 @@ function openMetricSpreadsheet() {{
     return `<td${{cls ? ` class="${{cls}}"` : ""}}>${{label}}</td>`;
   }}
   const rowsData = metricSpreadsheetRows();
-  const customHeaders = customMetricDefinitions().map(definition => `<th>custom_${{csvEscape(definition.key)}}</th>`).join("");
+  const customHeaders = customMetricDefinitions().map(definition => `<th>custom_${{csvEscape(definition.key)}}</th>` + (definition.categories ? `<th>custom_${{csvEscape(definition.key)}}_label</th>` : "")).join("");
   const rows = rowsData.map(row => `<tr>${{
     td(row.suite2p) +
     labelTd(row.label) +
@@ -5185,26 +5635,45 @@ function openMetricSpreadsheet() {{
     td(fmt(row.oasisEventSnr), row.fail.oasisEventSnr) +
     td(fmt(row.oasisRiseTau), row.fail.oasisRiseTau) +
     td(fmt(row.oasisDecayTau), row.fail.oasisDecayTau) +
-    customMetricDefinitions().map(definition => td(fmt(row.customMetrics[definition.key]), row.fail.customMetrics[definition.key])).join("") +
+    customMetricDefinitions().map(definition => td(fmt(row.customMetrics[definition.key]), row.fail.customMetrics[definition.key]) + (definition.categories ? td(customCategoryName(definition, row.customMetrics[definition.key])) : "")).join("") +
     td(row.reason)
   }}</tr>`).join("");
   const csv = metricSpreadsheetCsv(rowsData);
   const win = window.open("", "_blank");
-  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:8px 0 12px;padding:6px 10px}}.metric-table-wrap{{max-height:80vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}.metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}.metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td:nth-child(1),.metric-table td:nth-child(2),.metric-table td:nth-child(3),.metric-table td:nth-child(4),.metric-table td:nth-child(5),.metric-table td:last-child{{text-align:left}}.metric-fail,.label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}</style><h1>${{data.session}} ROI metric spreadsheet</h1><p>target_structure: ${{data.targetStructure}}</p><p>category_label_source: ${{data.cellTypeLabelSource || "not loaded"}}</p><p>roi_model_score_label_source: ${{data.roiModelLabelSource || "not loaded"}}</p><p>roi_model_score_source: ${{data.roiModelScoreSource || "not loaded"}}</p><button id="downloadCsv">Download CSV</button><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>suite2p_index</th><th>manual_label</th><th>category_label</th><th>category_code</th><th>roi_model_score_state</th><th>roi_model_score_probability</th><th>footprint</th><th>skew</th><th>aspect_ratio</th><th>compact</th><th>connectivity</th><th>roi_area_px</th><th>snr_95_50</th><th>caiman_exceptional_event_snr</th><th>inferred_spike_snr</th><th>inferred_spike_rise_tau_seconds</th><th>inferred_spike_decay_tau_seconds</th>${{customHeaders}}<th>reason</th></tr></thead><tbody>${{rows}}</tbody></table></div><script>const csv = ${{JSON.stringify(csv)}}; document.getElementById("downloadCsv").addEventListener("click", () => {{ const blob = new Blob([csv], {{type: "text/csv"}}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "${{data.session}}_roi_metric_spreadsheet.csv"; a.click(); URL.revokeObjectURL(a.href); }});<\\/script>`);
+  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:8px 0 12px;padding:6px 10px}}.metric-table-wrap{{max-height:80vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}.metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}.metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td:nth-child(1),.metric-table td:nth-child(2),.metric-table td:nth-child(3),.metric-table td:nth-child(4),.metric-table td:nth-child(5),.metric-table td:last-child{{text-align:left}}.metric-fail,.label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}</style><h1>${{data.session}} ROI metric spreadsheet</h1><p>filter_set: ${{loadedFilterSetName() || "none"}}</p><p>cell_identity_label_source: ${{data.cellTypeLabelSource || "not loaded"}}</p><p>roi_model_score_label_source: ${{data.roiModelLabelSource || "not loaded"}}</p><p>roi_model_score_source: ${{data.roiModelScoreSource || "not loaded"}}</p><button id="downloadCsv">Download CSV</button><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>suite2p_index</th><th>manual_label</th><th>cell_identity_label</th><th>cell_identity_code</th><th>roi_model_score_state</th><th>roi_model_score_probability</th><th>footprint</th><th>skew</th><th>aspect_ratio</th><th>compact</th><th>connectivity</th><th>roi_area_px</th><th>snr_95_50</th><th>caiman_exceptional_event_snr</th><th>inferred_spike_snr</th><th>inferred_spike_rise_tau_seconds</th><th>inferred_spike_decay_tau_seconds</th>${{customHeaders}}<th>reason</th></tr></thead><tbody>${{rows}}</tbody></table></div><script>const csv = ${{JSON.stringify(csv)}}; document.getElementById("downloadCsv").addEventListener("click", () => {{ const blob = new Blob([csv], {{type: "text/csv"}}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "${{data.session}}_roi_metric_spreadsheet.csv"; a.click(); URL.revokeObjectURL(a.href); }});<\\/script>`);
   win.document.close();
+}}
+function customCategoryName(definition, value) {{
+  if (!definition.categories || value === null || value === undefined || !Number.isFinite(Number(value))) return "";
+  return definition.categories[String(Number(value))] ?? "";
 }}
 function saveMetricSpreadsheet() {{
   downloadBlob(new Blob([metricSpreadsheetCsv()], {{type: "text/csv"}}), `${{data.session}}_roi_metric_spreadsheet.csv`);
 }}
+function currentSortSettings() {{
+  return {{metrics: Array.from(appliedSortMetrics), direction: appliedSortDirection}};
+}}
+function applySortSettings(sort) {{
+  if (!sort || typeof sort !== "object") return false;
+  const wanted = Array.isArray(sort.metrics) && sort.metrics.length ? sort.metrics.map(String) : ["original"];
+  const inputs = Array.from(document.querySelectorAll('input[name="sortMetric"]'));
+  const known = new Set(inputs.map(input => input.value));
+  const usable = wanted.filter(metric => known.has(metric));
+  inputs.forEach(input => {{ input.checked = usable.length ? usable.includes(input.value) : input.value === "original"; }});
+  document.getElementById("sortDirection").value = sort.direction === "desc" ? "desc" : "asc";
+  return true;
+}}
 function saveCurrentFilters() {{
+  const name = currentPresetName() || loadedFilterSetName() || `${{data.session}} filter set`;
   const payload = {{
-    format: "utils_2p_roi_metric_filter_v1",
+    format: "roi_reviewer_filter_sort_settings_v1",
+    name,
     session: data.session,
-    target_structure: data.targetStructure,
     saved_at: new Date().toISOString(),
     filter: normalizeFilter(readFilter()),
+    sort: currentSortSettings(),
   }};
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2) + "\\n"], {{type: "application/json"}}), `${{data.session}}_roi_metric_filters.json`);
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2) + "\\n"], {{type: "application/json"}}), `${{data.session}}_filter_sort_settings.json`);
 }}
 document.getElementById("openExclusions").addEventListener("click", openMetricSpreadsheet);
 function npyBlob(values, rows) {{
@@ -5264,6 +5733,8 @@ async function saveHtmlWithLabels() {{
     initialLabels: Array.from(labels),
     initialMorphologyFilter: readFilter(),
     customMorphologyPresets: customPresets,
+    initialFilterSet: loadedFilterSetName() || null,
+    initialSort: currentSortSettings(),
     savedAt: new Date().toISOString(),
   }};
   const filename = `${{data.session}}_interactive_fov_roi_dff.html`;
@@ -5295,15 +5766,18 @@ async function saveHtmlWithLabels() {{
   }}
   downloadBlob(blob, filename);
 }}
-function importPresetObject(payload) {{
-  const name = String(payload.name || payload.preset_name || "").trim();
+function importPresetObject(payload, fallbackName = "") {{
+  // Older exports carry no name; fall back to the file name so they still import.
+  const name = String(payload.name || payload.preset_name || payload.filter_set || fallbackName || "").trim();
   const filter = payload.filter || payload.morphology_filter || payload;
-  if (!name) throw new Error("QC thresholds JSON must include a name.");
+  if (!name) throw new Error("the filter set JSON has no name.");
   customPresets[name] = normalizeFilter(filter);
   populatePresetSelect(name);
   document.getElementById("filterPreset").value = `custom:${{name}}`;
   document.getElementById("presetName").value = name;
+  updateMetricDefaults();
   writeFilter(customPresets[name]);
+  if (applySortSettings(payload.sort)) applySort();
 }}
 document.getElementById("saveManualLabels").addEventListener("click", saveManualLabels);
 document.getElementById("saveHtmlWithLabels").addEventListener("click", saveHtmlWithLabels);
@@ -5342,9 +5816,9 @@ presetFileInput.addEventListener("change", () => {{
   const reader = new FileReader();
   reader.onload = () => {{
     try {{
-      importPresetObject(JSON.parse(reader.result));
+      importPresetObject(JSON.parse(reader.result), file.name.replace(/\\.json$/i, ""));
     }} catch (error) {{
-      alert(`Could not import QC thresholds: ${{error.message}}`);
+      alert(`Could not import the filter set: ${{error.message}}`);
     }}
   }};
   reader.readAsText(file);
@@ -5446,8 +5920,224 @@ window.addEventListener("mousemove", e => {{ if (!motionDragging) return; const 
 window.addEventListener("mouseup", () => {{ motionDragging=false; document.getElementById("motionDriftCanvas").classList.remove("dragging"); }});
 document.getElementById("motionDriftCanvas").addEventListener("dblclick", reset);
 window.addEventListener("resize", () => {{ syncControlColumnHeight(); draw(); }});
-makeOverlays(); syncTimeInputs(); renderCustomMetricControls(); renderCustomSortMetrics(); updateSortMetricHandlers(); updateMetricDefaults(); updateCellTypeLabelStatus(); updateRoiDisplaySummary(); populatePresetSelect("all_rois"); resetFilter();
+const RANGE_LABEL_BUILT_IN = [
+  "roi_model_score_probability", "aspect", "compact", "connectivity", "roi_area", "skew",
+  "snr_95_50", "andrea_postdoc_snr", "oasis_event_snr", "oasis_rise_tau_seconds", "oasis_decay_tau_seconds",
+];
+function rangeLabelMetrics() {{
+  const metrics = RANGE_LABEL_BUILT_IN.filter(metric => finiteMetricValues(metric).length);
+  for (const definition of customMetricDefinitions()) metrics.push(`custom:${{definition.key}}`);
+  return metrics;
+}}
+function refreshRangeMetricOptions() {{
+  const select = document.getElementById("rangeLabelMetric");
+  if (!select) return;
+  const current = select.value;
+  select.textContent = "";
+  for (const metric of rangeLabelMetrics()) {{
+    const option = document.createElement("option");
+    option.value = metric;
+    option.textContent = metricLabel(metric);
+    select.appendChild(option);
+  }}
+  if ([...select.options].some(option => option.value === current)) select.value = current;
+  document.getElementById("fillModelRanges").hidden = !finiteMetricValues("roi_model_score_probability").length;
+  updateRangeLabelPreview();
+}}
+function rangeLabelMode() {{
+  return document.getElementById("rangeLabelMode").value;
+}}
+function addRangeLabelRow(min = "", max = "", target = "") {{
+  const rows = document.getElementById("rangeLabelRows");
+  const row = document.createElement("div");
+  row.className = "range-label-row";
+  const field = (text, cls, value) => {{
+    const label = document.createElement("label");
+    label.textContent = text;
+    const input = document.createElement("input");
+    input.type = "number"; input.step = "any"; input.placeholder = "Not Used"; input.className = cls;
+    input.value = value === null || value === undefined ? "" : value;
+    input.addEventListener("input", updateRangeLabelPreview);
+    label.appendChild(input);
+    return label;
+  }};
+  row.appendChild(field("Min", "range-min", min));
+  row.appendChild(field("Max", "range-max", max));
+  const targetLabel = document.createElement("label");
+  targetLabel.className = "range-target-label";
+  row.appendChild(targetLabel);
+  row.dataset.target = target;
+  const count = document.createElement("span");
+  count.className = "range-count";
+  row.appendChild(count);
+  const remove = document.createElement("button");
+  remove.type = "button"; remove.textContent = "Remove"; remove.className = "range-remove";
+  remove.addEventListener("click", () => {{ row.remove(); updateRangeLabelPreview(); }});
+  row.appendChild(remove);
+  rows.appendChild(row);
+  renderRangeTargets();
+  updateRangeLabelPreview();
+}}
+function renderRangeTargets() {{
+  const mode = rangeLabelMode();
+  document.querySelectorAll("#rangeLabelRows .range-label-row").forEach((row, index) => {{
+    const holder = row.querySelector(".range-target-label");
+    const previous = holder.querySelector("select, input");
+    const kept = previous ? previous.value : row.dataset.target;
+    holder.textContent = mode === "gbu" ? "Label" : "Range name";
+    let control;
+    if (mode === "gbu") {{
+      control = document.createElement("select");
+      for (const [value, text] of [["1", "Good"], ["0", "Bad"], ["2", "Unsure"]]) {{
+        const option = document.createElement("option");
+        option.value = value; option.textContent = text;
+        control.appendChild(option);
+      }}
+      if (["1", "0", "2"].includes(String(kept))) control.value = String(kept);
+    }} else {{
+      control = document.createElement("input");
+      control.type = "text";
+      control.placeholder = `range ${{index + 1}}`;
+      control.value = ["1", "0", "2"].includes(String(kept)) ? "" : (kept || "");
+    }}
+    control.className = "range-target";
+    control.addEventListener("change", () => {{ row.dataset.target = control.value; }});
+    row.dataset.target = control.value;
+    holder.appendChild(control);
+  }});
+  document.getElementById("rangeLabelVariableNameLabel").hidden = mode !== "variable";
+  document.getElementById("rangeLabelOnlyUnlabeledLabel").hidden = mode !== "gbu";
+  document.getElementById("applyRangeLabels").textContent = mode === "gbu" ? "Assign labels" : "Create variable";
+}}
+function readRangeLabelRows() {{
+  const read = input => {{
+    if (!input || String(input.value).trim() === "") return null;
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : NaN;
+  }};
+  return Array.from(document.querySelectorAll("#rangeLabelRows .range-label-row")).map((row, index) => ({{
+    row,
+    index,
+    min: read(row.querySelector(".range-min")),
+    max: read(row.querySelector(".range-max")),
+    target: row.querySelector(".range-target")?.value ?? "",
+  }}));
+}}
+function matchRangeRow(value, ranges) {{
+  if (!Number.isFinite(value)) return -1;
+  for (let k = 0; k < ranges.length; k++) {{
+    const range = ranges[k];
+    if (range.min === null && range.max === null) continue;
+    if (range.min !== null && !(value >= range.min)) continue;
+    if (range.max !== null && !(value <= range.max)) continue;
+    return k;
+  }}
+  return -1;
+}}
+function updateRangeLabelPreview() {{
+  const metric = document.getElementById("rangeLabelMetric")?.value;
+  const ranges = readRangeLabelRows();
+  const counts = new Array(ranges.length).fill(0);
+  let outside = 0, missing = 0;
+  if (metric) {{
+    for (let roi = 0; roi < data.nRois; roi++) {{
+      const value = Number(metricValue(roi, metric));
+      if (!Number.isFinite(value)) {{ missing++; continue; }}
+      const k = matchRangeRow(value, ranges);
+      if (k < 0) outside++; else counts[k]++;
+    }}
+  }}
+  ranges.forEach((range, k) => {{
+    const invalid = (range.min === null && range.max === null) || Number.isNaN(range.min) || Number.isNaN(range.max)
+      || (range.min !== null && range.max !== null && range.min > range.max);
+    range.row.querySelector(".range-count").textContent = invalid ? "set a min and/or max" : `${{counts[k].toLocaleString()}} ROIs`;
+  }});
+  const status = document.getElementById("rangeLabelStatus");
+  if (status && !status.dataset.sticky) {{
+    status.textContent = ranges.length
+      ? `${{outside.toLocaleString()}} ROIs fall outside every range${{missing ? ` and ${{missing.toLocaleString()}} have no value for this metric` : ""}}; they will be left unchanged.`
+      : "Add a range to start.";
+  }}
+  if (status) delete status.dataset.sticky;
+}}
+function fillModelScoreRanges() {{
+  const scored = (data.roiModelScores || []).find(entry => entry && Number.isFinite(Number(entry.good_threshold)) && Number.isFinite(Number(entry.bad_threshold)));
+  const good = scored ? Number(scored.good_threshold) : 0.85;
+  const bad = scored ? Number(scored.bad_threshold) : 0.15;
+  document.getElementById("rangeLabelMetric").value = "roi_model_score_probability";
+  document.getElementById("rangeLabelMode").value = "gbu";
+  document.getElementById("rangeLabelRows").textContent = "";
+  addRangeLabelRow(good, "", "1");
+  addRangeLabelRow("", bad, "0");
+  addRangeLabelRow(bad, good, "2");
+}}
+function applyRangeLabels() {{
+  const metric = document.getElementById("rangeLabelMetric").value;
+  const ranges = readRangeLabelRows();
+  const status = document.getElementById("rangeLabelStatus");
+  const say = text => {{ status.textContent = text; status.dataset.sticky = "1"; }};
+  if (!metric) return say("No numeric metric is available to assign from.");
+  if (!ranges.length) return say("Add at least one range first.");
+  for (const range of ranges) {{
+    if ((range.min === null && range.max === null) || Number.isNaN(range.min) || Number.isNaN(range.max)) return say(`Range ${{range.index + 1}} needs a numeric min and/or max.`);
+    if (range.min !== null && range.max !== null && range.min > range.max) return say(`Range ${{range.index + 1}} has its min above its max.`);
+  }}
+  const mode = rangeLabelMode();
+  if (mode === "gbu") {{
+    const onlyUnlabeled = document.getElementById("rangeLabelOnlyUnlabeled").checked;
+    const counts = {{1: 0, 0: 0, 2: 0}};
+    let outside = 0, skipped = 0;
+    for (let roi = 0; roi < data.nRois; roi++) {{
+      const k = matchRangeRow(Number(metricValue(roi, metric)), ranges);
+      if (k < 0) {{ outside++; continue; }}
+      if (onlyUnlabeled && labels[roi] !== -1) {{ skipped++; continue; }}
+      const label = Number(ranges[k].target);
+      labels[roi] = label;
+      counts[label]++;
+    }}
+    updateLabelControls();
+    updateVisibleRois(true);
+    say(`Labeled ${{counts[1].toLocaleString()}} good, ${{counts[0].toLocaleString()}} bad and ${{counts[2].toLocaleString()}} unsure from ${{metricLabel(metric)}}; ${{outside.toLocaleString()}} ROIs were outside every range or had no value${{skipped ? `, and ${{skipped.toLocaleString()}} already labeled ROIs were left as they were` : ""}}.`);
+    return;
+  }}
+  const name = document.getElementById("rangeLabelVariableName").value.trim();
+  if (!name) return say("Enter a name for the new variable first.");
+  if (!data.customRoiMetrics || !Array.isArray(data.customRoiMetrics.values)) {{
+    data.customRoiMetrics = {{definitions: [], values: Array.from({{length: data.nRois}}, () => ({{}})), sources: []}};
+  }}
+  const key = ensureUniqueCustomMetricKey(customMetricKey(name));
+  const categories = {{}};
+  ranges.forEach((range, k) => {{ categories[String(k + 1)] = String(range.target || "").trim() || `range ${{k + 1}}`; }});
+  const tally = new Array(ranges.length).fill(0);
+  for (let roi = 0; roi < data.nRois; roi++) {{
+    const k = matchRangeRow(Number(metricValue(roi, metric)), ranges);
+    data.customRoiMetrics.values[roi][key] = k < 0 ? null : k + 1;
+    if (k >= 0) tally[k]++;
+  }}
+  data.customRoiMetrics.definitions.push({{key, label: name, source: `ranges of ${{metricLabel(metric)}}`, origin: "ranges", section: "uploaded", categories}});
+  renderCustomMetricControls();
+  renderCustomSortMetrics();
+  updateSortMetricHandlers();
+  updateMetricDefaults();
+  evaluateFilter();
+  say(`Created "${{name}}" under Uploaded ROI Metrics: ${{ranges.map((range, k) => `${{k + 1}} = ${{categories[String(k + 1)]}} (${{tally[k].toLocaleString()}} ROIs)`).join(", ")}}.`);
+}}
+function initRangeLabels() {{
+  document.getElementById("rangeLabelMetric").addEventListener("change", updateRangeLabelPreview);
+  document.getElementById("rangeLabelMode").addEventListener("change", renderRangeTargets);
+  document.getElementById("addRangeLabelRow").addEventListener("click", () => addRangeLabelRow());
+  document.getElementById("fillModelRanges").addEventListener("click", fillModelScoreRanges);
+  document.getElementById("applyRangeLabels").addEventListener("click", applyRangeLabels);
+  refreshRangeMetricOptions();
+  if (finiteMetricValues("roi_model_score_probability").length) fillModelScoreRanges();
+  else addRangeLabelRow();
+}}
+makeOverlays(); syncTimeInputs(); renderCustomMetricControls(); renderCustomSortMetrics(); updateSortMetricHandlers(); updateMetricDefaults(); updateCellTypeLabelStatus(); updateRoiDisplaySummary();
+const initialFilterSet = data.initialFilterSet && (customPresets[data.initialFilterSet] || data.morphologyPresets[data.initialFilterSet]) ? data.initialFilterSet : "all_rois";
+populatePresetSelect(initialFilterSet); resetFilter();
 if (data.initialMorphologyFilter) writeFilter(data.initialMorphologyFilter);
+initRangeLabels();
+applySortSettings(data.initialSort);
 applySort(); syncControlColumnHeight(); setSelected(visibleRois[0]);
 if (data.dffStorageMode === "file" && data.dffSidecarName) {{
   loadSidecarByRelativeName(data.dffSidecarName, setDffFromArrayBuffer, "dF/F");
@@ -5473,10 +6163,30 @@ def create_preprocessing_summary(
     input_layout: str = "auto",
     initialize_labels_from_roi_model_scores: bool = False,
     custom_roi_metrics: list[str | os.PathLike[str]] | None = None,
+    custom_roi_metric_sections: list[str] | None = None,
+    filter_settings: str | os.PathLike[str] | None = None,
+    html_only: bool = False,
 ) -> tuple[Path, Path]:
     input_path = Path(os.path.abspath(os.path.expanduser(os.fspath(session_data_path))))
     session_dir, resolved_layout = _resolve_summary_session_and_layout(input_path, input_layout)
     out_dir = Path(output_dir).expanduser().resolve() if output_dir else session_dir
+    loaded_filter_settings = _load_filter_settings(filter_settings) if filter_settings else None
+    globals()["_LAST_BUILD_WAS_HTML_ONLY"] = False
+    if html_only:
+        existing_html = out_dir / (html_name or HTML_NAME_TEMPLATE.format(session_name=session_dir.name))
+        existing_pdf = out_dir / (pdf_name or PDF_NAME_TEMPLATE.format(session_name=session_dir.name))
+        if existing_html.exists():
+            _rebuild_reviewer_html(
+                existing_html,
+                input_layout_name=resolved_layout.name,
+                target_structure=target_structure,
+                custom_roi_metrics=custom_roi_metrics,
+                custom_roi_metric_sections=custom_roi_metric_sections,
+                filter_settings=loaded_filter_settings,
+            )
+            globals()["_LAST_BUILD_WAS_HTML_ONLY"] = True
+            return existing_pdf, existing_html
+        print(f"--html-only: no existing reviewer at {existing_html}; generating everything instead.")
     out_dir.mkdir(parents=True, exist_ok=True)
     ops = _load_ops(session_dir)
     _log_summary_input_layout(resolved_layout, input_layout)
@@ -5583,6 +6293,9 @@ def create_preprocessing_summary(
     roi_model_scores_labels, roi_model_score_label_source = _load_roi_label_h5(session_dir, n_rois, stat)
     roi_model_scores, roi_model_score_source = _load_roi_model_scores(session_dir, n_rois)
     custom_roi_metric_payload = _load_custom_roi_metrics(custom_roi_metrics, n_rois, suite2p_indices)
+    for definition in custom_roi_metric_payload.get("definitions", []):
+        definition.setdefault("origin", "command line")
+    _assign_custom_metric_sections(custom_roi_metric_payload, custom_roi_metric_sections)
     target_structure = target_structure or _target_structure(pipeline_parameters, qc_parameters)
     preset_exclusion_reasons = (
         morphology_exclusion_reasons(morphology_metrics, qc_parameters)
@@ -5645,6 +6358,7 @@ def create_preprocessing_summary(
         oasis_storage_mode=oasis_storage_mode,
         oasis_sidecar_name=oasis_sidecar_name,
         initialize_labels_from_roi_model_scores=initialize_labels_from_roi_model_scores,
+        filter_settings=loaded_filter_settings,
     )
     return pdf_path, html_path
 
@@ -5658,8 +6372,16 @@ def create_processing_summary(
     input_layout: str = "auto",
     initialize_labels_from_roi_model_scores: bool = False,
     custom_roi_metrics: list[str | os.PathLike[str]] | None = None,
+    custom_roi_metric_sections: list[str] | None = None,
+    filter_settings: str | os.PathLike[str] | None = None,
+    html_only: bool = False,
 ) -> tuple[Path, Path]:
-    """Create the processing summary PDF and interactive HTML outputs."""
+    """Create the processing summary PDF and interactive HTML outputs.
+
+    With ``html_only=True`` and an existing reviewer in the output directory, only the
+    HTML is rebuilt, from the data already embedded in it; nothing is recomputed and the
+    PDF and sidecar files are left as they are.
+    """
 
     return create_preprocessing_summary(
         session_data_path,
@@ -5670,6 +6392,9 @@ def create_processing_summary(
         input_layout=input_layout,
         initialize_labels_from_roi_model_scores=initialize_labels_from_roi_model_scores,
         custom_roi_metrics=custom_roi_metrics,
+        custom_roi_metric_sections=custom_roi_metric_sections,
+        filter_settings=filter_settings,
+        html_only=html_only,
     )
 
 
@@ -5746,7 +6471,10 @@ def main() -> None:
         "--target-structure",
         choices=SUMMARY_TARGET_STRUCTURES,
         default=None,
-        help="Override the reviewer-side target label shown in the interactive reviewer.",
+        help=(
+            "Built-in filter set (ROI metric thresholds) the reviewer's distributions start from; "
+            "default: the session's pipeline target structure."
+        ),
     )
     parser.add_argument(
         "--initialize-labels-from-roi-model-scores",
@@ -5778,6 +6506,35 @@ def main() -> None:
             "otherwise row order is used."
         ),
     )
+    parser.add_argument(
+        "--custom-roi-metric-section",
+        action="append",
+        default=[],
+        metavar="NAME=SECTION",
+        help=(
+            "Show a custom ROI metric under a given section of the Filter menu (and the matching Sort group) "
+            f"instead of 'Uploaded ROI Metrics'. NAME is the metric's column name; SECTION is one of "
+            f"{', '.join(CUSTOM_METRIC_SECTIONS)}. Can be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--filter-settings",
+        default=None,
+        help=(
+            "Filter/sorting settings to open the reviewer with: a JSON file exported with "
+            "'Export current filter/sorting settings JSON' (or the same keys in JSON/YAML). "
+            "Its thresholds are added as a saved filter set and loaded, and its sort order is applied."
+        ),
+    )
+    parser.add_argument(
+        "--html-only",
+        action="store_true",
+        help=(
+            "Rebuild only the reviewer HTML from the data embedded in the existing reviewer in the output "
+            "directory, without recomputing metrics, sidecars or the PDF. Labels and settings saved in that "
+            "HTML are kept. Falls back to a full build when no reviewer exists yet."
+        ),
+    )
     args = parser.parse_args()
     if args.roi_index_label:
         globals()["ROI_INDEX_LABEL"] = args.roi_index_label
@@ -5802,8 +6559,14 @@ def main() -> None:
         input_layout=args.input_layout,
         initialize_labels_from_roi_model_scores=args.initialize_labels_from_roi_model_scores,
         custom_roi_metrics=args.custom_roi_metrics,
+        custom_roi_metric_sections=args.custom_roi_metric_section,
+        filter_settings=args.filter_settings,
+        html_only=args.html_only,
     )
-    print(f"Saved processing PDF: {pdf_path}")
+    if _LAST_BUILD_WAS_HTML_ONLY:
+        print(f"Rebuilt the reviewer from its embedded data; kept the existing PDF and sidecars: {pdf_path.parent}")
+    else:
+        print(f"Saved processing PDF: {pdf_path}")
     print(f"Saved interactive HTML: {html_path}")
     if args.archive_output:
         archived = archive_summary_outputs(Path(output_dir), archive_path=archive_path)
