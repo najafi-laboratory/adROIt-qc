@@ -1,6 +1,6 @@
-# model — portable ROI-QC models
+# Model inference and fine-tuning
 
-This folder contains everything needed to run score-only inference with the two selected ROI-QC models, or fine-tune either existing model on new labeled sessions. It is independent of the code in its parent PACE project. The original code, weights and labels outside this folder were not modified.
+This folder contains everything needed to run score-only inference with the two selected ROI-QC models, or fine-tune either existing model on new labeled sessions. 
 
 ## Included models
 
@@ -9,21 +9,19 @@ This folder contains everything needed to run score-only inference with the two 
 | purkinje | weights/purkinje_all.pt | image + fluorescence/neuropil signals + 24 metrics | good >= 0.85; bad <= 0.15 |
 | ppc_vis | weights/ppc_vis_signal_metrics.pt | fluorescence/neuropil signals + 24 metrics | good >= 0.85; bad <= 0.15 |
 
-These are copies of the original selected best checkpoints, not newly trained replacements. Only these two pretrained checkpoints are included. Profiles and relative weight paths are in profiles.json.
+Only these two selected best pretrained checkpoints are included. Profiles and relative weight paths are in profiles.json.
 
-Both models predict P(good ROI), not cell identity. Select the appropriate profile explicitly. There is no automatic classification into Purkinje versus PPC/VIS.
+Both models predict P(good ROI), not cell identity. 
 
 ## Installation and portability
 
 Use Python 3.10 or later in a suitable environment:
 
-    python -m pip install -r /path/to/modeling/requirements.txt
+    python -m pip install -r /path/to/model/requirements.txt
 
-PyTorch CPU inference works; a compatible CUDA-enabled PyTorch installation can use a GPU. No model weights are downloaded at runtime. The existing weights include the image backbone.
+PyTorch CPU inference works; a compatible CUDA-enabled PyTorch installation can use a GPU. No model weights are downloaded at runtime.
 
-requirements.txt is a clean dependency list rather than a machine-specific Conda export.
-
-You may copy this entire folder to another machine. No PACE home/project paths are needed by runtime code. Session locations are command-line arguments. The standalone run.py entry point also works if this folder is later renamed to model.
+You may copy this entire folder to another machine. Session locations are command-line arguments. 
 
 ## Inference commands
 
@@ -73,9 +71,7 @@ Each QC row must represent the same ROI across stat, fluo and neuropil. Mask lab
 
 The original suite2p/plane0/stat.npy is used to map QC rows back to original ROI indices by exact ordered xpix/ypix arrays. Missing, ambiguous or repeated matches fail explicitly. Counts alone are never used to infer identity.
 
-The package does not run Suite2p, generate qc_results, process raw movies, or support every external layout accepted by the reviewer. Those adapters can be added separately. The checkpoint profile should only be used on compatible inputs.
-
-## Output consumed by roi-reviewer-demo
+## Output consumed by interface
 
 The HDF5 score file contains:
 
@@ -89,21 +85,8 @@ The HDF5 score file contains:
 
 Only QC ROIs are scored. Original ROIs not present in qc_results have no score; they are not silently labeled bad.
 
-For the current roi-reviewer-demo:
-
-1. Put roi_model_scores.h5 at the session root.
-2. Build the reviewer using input_layout: suite2p, or auto when it selects the original Suite2p data.
-3. The model probability appears under Model Derived Metrics.
-4. Leave initialize_labels_from_model_scores: false to open manual labels independently.
-   Set it to true only if you intentionally want the reviewer to initialize its in-memory labels from scores.
-
-The demo reads score filenames in this priority order:
-roi_model_scores.h5, roi_qc_predictions.h5, roi_predictions.h5.
-Using the first filename avoids an older score file taking priority.
-
 IMPORTANT: use original Suite2p layout for these original-index score files. The current demo score loader does not translate original indices for a filtered qc_results reviewer layout. It can display the precomputed scores without importing this model package.
 
-The demo contains some static explanatory text describing the older dendrite model. This does not identify which model generated a file; use the exported model metadata instead.
 
 ## Preserved preprocessing
 
@@ -115,9 +98,6 @@ The supplied checkpoints depend on the original preprocessing:
   with standard-deviation and constant-trace fallbacks.
 - The original 24 QC metrics in the original column order.
 - Metric normalization using metric_mean/metric_std stored in the checkpoint.
-
-The image division by 255 is retained intentionally for compatibility, even though
-the preceding patch normalization already produces standardized values. Do not remove it for existing checkpoints without retraining and validating a new preprocessing version.
 
 PPC/VIS inference skips image-patch construction, but still uses the QC/original ROI identity information. Purkinje inference uses every branch.
 
@@ -195,38 +175,3 @@ New checkpoints retain normalization, modality flags and feature schema, so infe
 can use them directly with --checkpoint. Base weights under weights/ are never modified.
 This package does not automatically resume an interrupted optimizer; --checkpoint starts
 a new fine-tuning run from the supplied learned weights.
-
-Training metrics are measured on augmented batches during training.
-Validation is used for selection and is not an independent final test.
-
-## Files and provenance
-
-- cnn.py: copied network definitions from the source model/cnn.py; unused legacy
-  ROIModel wrapper removed. Layer definitions are preserved.
-- data/crop.py: copied patch extraction, without its standalone self-test.
-- data/builder.py: copied feature/dataset builder, with package imports, no hard-coded
-  session list, and strict read-only label loading.
-- data/dataset.py: copied original dataset/normalization/augmentation implementation.
-- data/alignment.py: exact shared ROI mapping.
-- checkpoints.py: profile-aware checkpoint loading.
-- sessions.py: label-free session features.
-- inference.py: score-only batched inference and original-index HDF5 export.
-- finetune.py: checkpoint-initialized single-model trainer.
-- run.py: standalone command dispatch.
-- profiles.json: model registry and fixed preprocessing.
-- weights/: only the two selected best model checkpoints.
-
-The parent project's code is not imported. There is no ablation grid, hyperparameter search,
-calcium-transient validation, reviewer notebook, raw data, or legacy prediction output in this
-package. Those are separate workflows.
-
-
-## Copying into roi-reviewer-demo later
-
-Copy this folder's contents into roi-reviewer-demo/model/ (including weights/ and data/).
-Then python model/run.py infer ... works, as does python -m model.inference ... from the
-repository root. Package-relative imports do not depend on the folder's original name.
-
-The demo currently packages only roi_reviewer in its root pyproject.toml. If distributing
-model through pip install ., add the new packages there and declare optional ML dependencies.
-No demo files were changed as part of creating this PACE folder.

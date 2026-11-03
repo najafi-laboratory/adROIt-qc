@@ -25,6 +25,8 @@ nav:
       - Preparing Your Inputs: inputs.md
       - Build Configuration: configuration.md
       - CLI, Config and Interface: cli-mapping.md
+  - Models:
+      - Inference and Fine-tuning: model.md
   - The Reviewer:
       - Interface Tour: interface.md
       - Metric Reference: metrics.md
