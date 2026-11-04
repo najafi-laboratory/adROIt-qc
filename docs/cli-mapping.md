@@ -61,16 +61,75 @@ directory and, if present, enables the matching part of the interface.
 
 | Reviewer control | What it loads | Build-time equivalent |
 |:--|:--|:--|
-| **Upload Custom ROI Metric or Label** → *Numerical metric* | CSV, TSV, TXT or JSON, one value per ROI per column | `custom_roi_metrics` / `--custom-roi-metrics`, which also accepts NPY and NPZ |
-| **Upload Custom ROI Metric or Label** → *Categorical label* | A table with `category_code` / `category_label` (or `cell_type_code` / `cell_type_label`) | `roi_cell_type_labels.npy` in the session; no flag |
+| **Upload Custom ROI Metrics/Cell Identity Labels** → *QC metric* | CSV, TSV, TXT or JSON, one value per ROI per column | `custom_roi_metrics` / `--custom-roi-metrics`, which also accepts NPY and NPZ |
+| **Upload Custom ROI Metrics/Cell Identity Labels** → *Cell identity label* | A table with `cell_identity_code` and/or `cell_identity_label` | `roi_cell_type_labels.npy` in the session; no flag |
 | **Load dF/F file** | A `.npy` dF/F array | The `<session>_dff.npy` sidecar the generator writes |
 | **Load inferred spikes file** | A `.npy` inferred-spike array | The `<session>_oasis_spikes.npy` sidecar the generator writes |
-| **Target structure** menu | A built-in morphology preset | `target_structure` / `--target-structure` sets which preset it opens on |
-| **Import QC thresholds JSON** | A threshold set exported from another reviewer | None: browser only |
+| **Filter set name** menu | A built-in or saved filter set | `filter_set` / `--filter-set` sets which built-in filter set it starts from |
+| **Import filter set JSON** | A filter set and sort order exported from a reviewer, or written by hand | `filter_settings` / `--filter-settings` |
 
-In both upload routes a table may carry a `suite2p_index`, `roi`, `roi_index` or
-`index` column, which maps rows to original ROI indices. Without one, rows are
-taken in order and their count must equal the number of ROIs.
+### Upload file formats
+
+`roi_index` is the ROI's 0-based original index, the number the reviewer shows for the selected ROI. It is optional: without it, row *k* is ROI *k* and the file needs exactly one row per ROI. No other name is accepted for this column; a file with a `suite2p_index`, `roi` or `index` column is rejected with a message asking for `roi_index`.
+
+**QC metric** (CSV, TSV or TXT): one row per ROI, one column per metric, numeric values.
+
+```csv
+roi_index,local_contrast,tdtomato_intensity
+0,0.82,1530
+1,0.41,212
+2,0.67,880
+```
+
+The same as JSON, one array per metric in original-index order (a list of row objects
+with a `roi_index` key also works):
+
+```json
+{
+  "local_contrast": [0.82, 0.41, 0.67],
+  "tdtomato_intensity": [1530, 212, 880]
+}
+```
+
+**Cell identity label:**
+
+```csv
+roi_index,cell_identity_code,cell_identity_label
+0,1,inhibitory
+1,-1,excitatory
+2,1,inhibitory
+```
+
+**Filter set JSON** (Import filter set JSON, or `--filter-settings`). Only `filter` is
+required; leave out thresholds you do not use, and write `null` for an unused minimum
+or maximum. Uploaded metrics are keyed by their column name in lower case, and are
+sorted with `custom:` plus that name.
+
+```json
+{
+  "name": "strict soma",
+  "filter": {
+    "skewMin": 0.5,
+    "aspectMax": 1.5,
+    "roiAreaMin": 40,
+    "cellTypeFilter": ["1"],
+    "customMetrics": {"local_contrast": {"min": 0.3, "max": null}}
+  },
+  "sort": {"metrics": ["custom:local_contrast"], "direction": "desc"}
+}
+```
+
+**Load dF/F file** and **Load inferred spikes file:** NumPy arrays, C-ordered,
+little-endian float32 (float64 is converted on load), named after the session so
+they load automatically when the page is served:
+
+```python
+import numpy as np
+
+# one row per ROI in original-index order, one column per frame; both arrays the same shape
+np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))
+np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))
+```
 
 **Embedding a metric at build time and uploading it in the browser are not the
 same in what persists.** A build-time metric is part of the file for everyone who

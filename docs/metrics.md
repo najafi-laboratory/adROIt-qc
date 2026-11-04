@@ -2,7 +2,7 @@
 
 Every metric in the reviewer's filter and sort menus is listed here with the column
 it maps to in the exported metric spreadsheet. The spreadsheet also carries
-`suite2p_index`, `manual_label`, `roi_model_score_state`, one `custom_<name>` column per
+`roi_index`, `manual_label`, `roi_model_score_state`, one `custom_<name>` column per
 uploaded metric, and `reason`, listing the active thresholds each ROI failed. Metrics are named by what they measure;
 where a definition comes from another package, the package is cited in the definition.
 

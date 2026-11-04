@@ -213,10 +213,18 @@ cell_type_labels[uncertain_roi_indices] =  0
 np.save("roi_cell_type_labels.npy", cell_type_labels)
 ```
 
-The same labels can be uploaded into an open reviewer with **Upload Custom ROI Metric
-or Label**, as a CSV with `cell_type_code,cell_type_label` columns and optionally a
-`suite2p_index`, `roi` or `index` column. Without an index column, rows are taken in ROI
-order and the file needs exactly one row per ROI.
+The same labels can be uploaded into an open reviewer with **Upload Custom ROI
+Metrics/Cell Identity Labels** → *Cell identity label*, as a table with a
+`cell_identity_code` column, a `cell_identity_label` column, or both:
+
+```csv
+roi_index,cell_identity_code,cell_identity_label
+0,1,inhibitory
+1,-1,excitatory
+2,1,inhibitory
+```
+
+`roi_index` is the ROI's 0-based original index, the number the reviewer shows for the selected ROI. It is optional: without it, row *k* is ROI *k* and the file needs exactly one row per ROI. No other name is accepted for this column; a file with a `suite2p_index`, `roi` or `index` column is rejected with a message asking for `roi_index`.
 
 ## ROI model scores
 

@@ -897,6 +897,27 @@ def _add_custom_metric_column(
         payload["values"][roi][key] = value
 
 
+RETIRED_ROI_INDEX_COLUMNS = ("suite2p_index", "roi", "index")
+
+
+def _roi_index_header(headers: Sequence[str], source: Path | str) -> str | None:
+    """The ``roi_index`` column of an uploaded table, or None when the table has none.
+
+    ``roi_index`` is the only accepted name. A former name (suite2p_index, roi, index) is
+    rejected rather than silently read as a metric column.
+    """
+
+    lower = {str(header).lower().strip(): header for header in headers}
+    if "roi_index" in lower:
+        return lower["roi_index"]
+    retired = [lower[name] for name in RETIRED_ROI_INDEX_COLUMNS if name in lower]
+    if retired:
+        raise ValueError(
+            f"{source}: the ROI index column must be named 'roi_index'; rename the column '{retired[0]}'."
+        )
+    return None
+
+
 def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarray) -> dict[str, Any]:
     delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
     with path.open(newline="") as handle:
@@ -904,11 +925,7 @@ def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarr
     if not rows:
         return _empty_custom_metrics(n_rois)
     headers = list(rows[0].keys())
-    lower_headers = {header.lower().strip(): header for header in headers}
-    index_header = next(
-        (lower_headers[name] for name in ("suite2p_index", "roi", "roi_index", "index") if name in lower_headers),
-        None,
-    )
+    index_header = _roi_index_header(headers, path)
     roi_index_values = [row.get(index_header) for row in rows] if index_header else None
     payload = _empty_custom_metrics(n_rois)
     payload["sources"].append(str(path))
@@ -941,6 +958,7 @@ def _load_custom_metric_json(path: Path, n_rois: int, suite2p_indices: np.ndarra
     if isinstance(raw, dict):
         for name, values in raw.items():
             if isinstance(values, dict) and "values" in values:
+                _roi_index_header(list(values), path)  # rejects a former index key name
                 _add_custom_metric_column(
                     payload,
                     name=values.get("label", name),
@@ -948,7 +966,7 @@ def _load_custom_metric_json(path: Path, n_rois: int, suite2p_indices: np.ndarra
                     source=values.get("source", str(path)),
                     n_rois=n_rois,
                     suite2p_indices=suite2p_indices,
-                    roi_index_values=values.get("suite2p_index"),
+                    roi_index_values=values.get("roi_index"),
                 )
             elif isinstance(values, list):
                 _add_custom_metric_column(
@@ -962,11 +980,7 @@ def _load_custom_metric_json(path: Path, n_rois: int, suite2p_indices: np.ndarra
         return payload
     if isinstance(raw, list) and raw and isinstance(raw[0], dict):
         headers = sorted({key for row in raw for key in row})
-        lower_headers = {header.lower().strip(): header for header in headers}
-        index_header = next(
-            (lower_headers[name] for name in ("suite2p_index", "roi", "roi_index", "index") if name in lower_headers),
-            None,
-        )
+        index_header = _roi_index_header(headers, path)
         roi_index_values = [row.get(index_header) for row in raw] if index_header else None
         for header in headers:
             if header == index_header:
@@ -2259,6 +2273,7 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .custom-metric-header label {{ display: flex; gap: 6px; align-items: center; }}
 .custom-metric-header select {{ width: auto; }}
 .custom-metric-slot:empty {{ display: none; }}
+.info-example-label {{ margin: 8px 0 2px; font-size: 13px; color: #475467; }}
 .info-example {{ margin: 4px 0 6px; padding: 6px 8px; background: #fff; border: 1px solid #e4e7ec; border-radius: 4px; font-size: 13px; white-space: pre; overflow-x: auto; }}
 .range-label-controls {{ display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 8px; font-size: 14px; color: #475467; }}
 .range-label-controls input[type=text], .range-label-controls select {{ display: block; margin-top: 3px; }}
@@ -2398,12 +2413,18 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div id="cellTypeMetricSources" class="info-box" hidden>
         <p><strong>Cell identity labels:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon). Check one or more identities below to keep only ROIs with those labels; if none are checked, this filter is not used.</p>
-        <p>Labels are read from the session's pipeline outputs when present, or uploaded as a CSV file with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. The CSV has a header row and one row per ROI, for example:</p>
-        <pre class="info-example">suite2p_index,cell_identity_code,cell_identity_label
+        <p>Labels are read from the session's pipeline outputs when present, or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong> as a CSV, TSV or TXT table or a JSON list. Give an integer code column, a name column, or both.</p>
+        <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
+        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
 0,1,inhibitory
 1,-1,excitatory
 2,1,inhibitory</pre>
-        <p><code>suite2p_index</code> is the ROI's 0-based original index (<code>roi</code>, <code>roi_index</code> or <code>index</code> also work); without an index column, row <em>k</em> is ROI <em>k</em> and the file needs one row per ROI. Give an integer code column, a name column, or both: <code>cell_identity_code</code> and <code>cell_identity_label</code> (<code>category_code</code>/<code>category_label</code> and the legacy <code>cell_type_code</code>/<code>cell_type_label</code> are also accepted). TSV, TXT and JSON (a list of row objects with the same keys) work too.</p>
+        <p class="info-example-label">JSON (cell_identity_labels.json)</p>
+        <pre class="info-example">[
+  {{"roi_index": 0, "cell_identity_code": 1, "cell_identity_label": "inhibitory"}},
+  {{"roi_index": 1, "cell_identity_code": -1, "cell_identity_label": "excitatory"}}
+]</pre>
+        <p><code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column. The code and name columns are <code>cell_identity_code</code> and <code>cell_identity_label</code>.</p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
         <span class="note">No cell identity labels loaded.</span>
@@ -2430,10 +2451,26 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div id="customMetricSources" class="info-box" hidden>
         <p>Uploaded ROI metrics are your own per-ROI values: files given with <code>--custom-roi-metrics</code> when the reviewer is generated, or QC metric files uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. A CSV has a header row, one row per ROI and one column per metric, for example:</p>
-        <pre class="info-example">suite2p_index,local_contrast,tdtomato_intensity
+        <p class="info-example-label">CSV (qc_metrics.csv)</p>
+        <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
 0,0.82,1530
-1,0.41,212</pre>
-        <p>Every column other than the optional index column (<code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code> or <code>index</code>) becomes a metric named after its header; without an index column, row <em>k</em> is ROI <em>k</em>. JSON may be an object of metric arrays (<code>{{"metric_name": [one value per ROI]}}</code>) or a list of row objects.</p>
+1,0.41,212
+2,0.67,880</pre>
+        <p class="info-example-label">JSON, one array per metric (qc_metrics.json)</p>
+        <pre class="info-example">{{
+  "local_contrast": [0.82, 0.41, 0.67],
+  "tdtomato_intensity": [1530, 212, 880]
+}}</pre>
+        <p class="info-example-label">JSON, one object per ROI</p>
+        <pre class="info-example">[
+  {{"roi_index": 0, "local_contrast": 0.82, "tdtomato_intensity": 1530}},
+  {{"roi_index": 1, "local_contrast": 0.41, "tdtomato_intensity": 212}}
+]</pre>
+        <p class="info-example-label">NumPy, command line only</p>
+        <pre class="info-example">import numpy as np
+# command line only (--custom-roi-metrics): one value per ROI, in original-index order
+np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity)</pre>
+        <p>Every column other than <code>roi_index</code> becomes a metric named after its header; values must be numbers, with blanks or <code>NaN</code> where missing. <code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column.</p>
         <p><strong>Section:</strong> an uploaded metric stays in this section unless you move it with its <strong>Section</strong> menu, which can place it under any section of this menu and the matching group of the Sort menu. The section can also be set when the reviewer is generated, with <code>--custom-roi-metric-section NAME=SECTION</code> or the <code>custom_roi_metric_sections</code> field of a YAML config. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/cli-mapping/#uploaded-metrics-and-their-sections" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
       </div>
       <div class="filter-controls">
@@ -2539,7 +2576,19 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div id="saveFiltersHelp" class="info-box" hidden>
         <p><strong>Save new filter set:</strong> saves the current thresholds under the name you enter, inside the open reviewer, so it appears in the Filter set name list until the page is closed.</p>
         <p><strong>Save filter set into HTML:</strong> saves it the same way, then downloads a copy of this HTML with it, the current labels and the current sort order embedded, so reopening that copy keeps them.</p>
-        <p><strong>Import filter set JSON:</strong> loads a file exported with <strong>Export current filter/sorting settings JSON</strong>, including its sort order.</p>
+        <p><strong>Import filter set JSON:</strong> loads a file exported with <strong>Export current filter/sorting settings JSON</strong>, including its sort order, or one written by hand. Only <code>filter</code> is required; leave out any threshold you do not want to use, and use <code>null</code> for an unused minimum or maximum. <code>cellTypeFilter</code> lists the cell identity codes to keep, custom metrics are keyed by their column name in lower case, with spaces and punctuation replaced by underscores, and sort metrics for uploaded metrics are written <code>custom:</code> plus that name. The same file can be given at generation with <code>--filter-settings</code>.</p>
+        <p class="info-example-label">Filter set JSON (strict_soma.json)</p>
+        <pre class="info-example">{{
+  "name": "strict soma",
+  "filter": {{
+    "skewMin": 0.5,
+    "aspectMax": 1.5,
+    "roiAreaMin": 40,
+    "cellTypeFilter": ["1"],
+    "customMetrics": {{"local_contrast": {{"min": 0.3, "max": null}}}}
+  }},
+  "sort": {{"metrics": ["custom:local_contrast"], "direction": "desc"}}
+}}</pre>
       </div>
       <div class="filter-controls">
         <label>New filter set name <input id="presetName" type="text" placeholder="my filter set"></label>
@@ -2619,9 +2668,9 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
     </div>
     <div id="saveLabelsHelp" class="info-box" hidden>
-      <p><strong>Save current state into HTML:</strong> downloads a reviewed HTML copy that preserves labels and custom filters inside the file.</p>
-      <p><strong>Export metric spreadsheet CSV:</strong> saves one row per ROI with code-friendly column names, current labels, ROI metrics, filter failures, and exclusion reasons.</p>
-      <p><strong>Export labels NPY:</strong> saves <code>roi_manual_labels.npy</code>, a one-dimensional NumPy label array with one row per original Suite2p ROI: <code>NaN</code> not labeled, <code>0</code> bad, <code>1</code> good, and <code>2</code> unsure.</p>
+      <p><strong>Save current state into HTML:</strong> downloads a reviewed HTML copy that keeps the current labels, uploaded metrics, saved filter sets and sort order inside the file.</p>
+      <p><strong>Export metric spreadsheet CSV:</strong> saves one row per ROI with code-friendly column names, current labels, ROI metrics, filter failures, and exclusion reasons. Its first column, <code>roi_index</code>, is the ROI's original index.</p>
+      <p><strong>Export labels NPY:</strong> saves <code>roi_manual_labels.npy</code>, a one-dimensional NumPy label array with one row per ROI, in original-index order: <code>NaN</code> not labeled, <code>0</code> bad, <code>1</code> good, and <code>2</code> unsure.</p>
       <p><strong>Export current filter/sorting settings JSON:</strong> saves the current thresholds, with the filter set name and the current sort order, for reuse or documentation.</p>
     </div>
     <div class="save-options">
@@ -2685,9 +2734,24 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <button id="applyCustomRoiUpload" type="button">Load selected file</button>
       <div id="customRoiUploadStatus" class="note"></div>
       <div class="info-box">
-        <p><strong>QC metric:</strong> custom per-ROI quality-control values to filter and sort by. Use a table with <strong>one row per ROI</strong> and <strong>one column per metric</strong>, with a header row whose names become the metric names; values must be numbers (leave blank or use NaN where missing). Row <em>k</em> is ROI <em>k</em> in original-index order, so a session with N ROIs needs N rows, unless the table has an index column (<code>suite2p_index</code>, <code>roi</code>, <code>roi_index</code> or <code>index</code>), which gives each row's original ROI index instead. Formats: CSV, TSV or TXT, or JSON as an object of metric arrays (<code>{{"metric_name": [N values]}}</code>) or a list of row objects.</p>
-        <p><strong>Cell identity label:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon). One row per ROI, matched to ROIs as for QC metrics, with an integer <code>category_code</code> column and/or a <code>category_label</code> name column (legacy <code>cell_type_code</code>/<code>cell_type_label</code> columns also work). Names can be edited below after loading.</p>
-        <p>Each file must provide one value per original ROI, or use a Suite2p index column to map rows to the original ROI indices. The viewer reports an error if the row/value count cannot match the ROI count.</p>
+        <p><strong>QC metric:</strong> your own per-ROI values to filter and sort by: one row per ROI, one column per metric, and a header row whose names become the metric names. Values must be numbers (blank or <code>NaN</code> where missing).</p>
+        <p class="info-example-label">CSV (qc_metrics.csv)</p>
+        <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
+0,0.82,1530
+1,0.41,212
+2,0.67,880</pre>
+        <p class="info-example-label">JSON, one array per metric</p>
+        <pre class="info-example">{{
+  "local_contrast": [0.82, 0.41, 0.67],
+  "tdtomato_intensity": [1530, 212, 880]
+}}</pre>
+        <p><strong>Cell identity label:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon): one row per ROI with an integer <code>cell_identity_code</code>, a <code>cell_identity_label</code> name, or both. Names can be edited below after loading.</p>
+        <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
+        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
+0,1,inhibitory
+1,-1,excitatory
+2,1,inhibitory</pre>
+        <p><code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column. The viewer reports an error if the number of rows does not match the number of ROIs. Accepted files: CSV, TSV, TXT and JSON; the Filter menu's Read more boxes show the JSON forms.</p>
       </div>
     </div>
     <div class="dialog-section" id="categoryLabelEditorSection" hidden>
@@ -2710,7 +2774,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <div class="fov-side">
             <div class="panel gbu-summary">
               <div class="oasis-diagnostics-header">
-                <div class="title">Summary of good/bad/unsure neurons</div>
+                <div class="title">Summary of good/bad/unsure ROIs</div>
                 <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" aria-expanded="true" aria-controls="gbuSummaryBody">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
               </div>
               <div id="gbuSummaryHelp" class="info-box" hidden>
@@ -2761,6 +2825,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <input id="oasisFile" type="file" accept=".npy">
           <button id="loadDffFile">Load dF/F file</button>
           <button id="loadOasisFile" type="button">Load inferred spikes file</button>
+          <button class="info-button" type="button" data-info-target="traceFileHelp" aria-expanded="false">Read more</button>
+        </div>
+        <div id="traceFileHelp" class="info-box" hidden>
+          <p>For larger sessions the dF/F and inferred-spike arrays are stored beside this HTML rather than inside it. Opened through a web address they load automatically; opened from disk, select them with these buttons.</p>
+          <p>Each file is a NumPy <code>.npy</code> array with one row per ROI, in original-index order, and one column per frame; both must have the same shape. Rows must be C-ordered (each row one contiguous time series) and little-endian float32, or float64, which is converted on load. Name them <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code>, with this reviewer's session name, to have them load automatically.</p>
+          <p class="info-example-label">Python</p>
+          <pre class="info-example">import numpy as np
+# one row per ROI in original-index order, one column per frame
+np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))            # (n_rois, n_frames)
+np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape</pre>
         </div>
         <div class="note" id="traceLoadNote"></div>
         <canvas id="traceCanvas"></canvas>
@@ -2806,7 +2880,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             <label>Selected ROI (<span class="roi-index-label">Suite2p Original Index</span>) <input id="roiInput" type="number" min="0" value="0"> <span id="selectedSortPosition" class="note"></span></label>
             <button class="info-button" type="button" data-info-target="roiIndexHelp" aria-expanded="false">Read more</button>
             <div id="roiIndexHelp" class="info-box" hidden>
-              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed identifier. It is 0-indexed, like every input and output file the Python generator reads and writes: ROI <em>k</em> is row <em>k</em> of <code>stat.npy</code>, <code>F.npy</code>, <code>Fneu.npy</code>, <code>iscell.npy</code>, <code>dff.h5</code>, <code>spikes.h5</code> and the <code>_dff.npy</code> / <code>_oasis_spikes.npy</code> sidecars, and row <em>k</em> of the exported <code>roi_manual_labels.npy</code>. The same number appears in the <code>suite2p_index</code> column of the exported metric CSV, and is what an index column means when you upload custom metrics or labels. With N ROIs it runs from 0 to N&nbsp;&minus;&nbsp;1, so the last of 225 ROIs is 224.</p>
+              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed identifier. It is 0-indexed, like every input and output file the Python generator reads and writes: ROI <em>k</em> is row <em>k</em> of <code>stat.npy</code>, <code>F.npy</code>, <code>Fneu.npy</code>, <code>iscell.npy</code>, <code>dff.h5</code>, <code>spikes.h5</code> and the <code>_dff.npy</code> / <code>_oasis_spikes.npy</code> sidecars, and row <em>k</em> of the exported <code>roi_manual_labels.npy</code>. The same number appears in the <code>roi_index</code> column of the exported metric CSV, and is what the <code>roi_index</code> column means in uploaded metric and cell identity files. With N ROIs it runs from 0 to N&nbsp;&minus;&nbsp;1, so the last of 225 ROIs is 224.</p>
               <p>For masks from other segmentation software, the index is the ROI's row after the mask labels are sorted in ascending order, not the label value stored in the mask.</p>
               <p><strong>Sort position</strong> counts from 1 within the ROIs currently shown, in the current sort order. It changes when you sort, filter or hide labels; the original index never does. Type an original index in the box to jump to that ROI.</p>
             </div>
@@ -3283,15 +3357,20 @@ function addCustomMetricDefinition(label, values, sourceName, roiIndexValues = n
   data.customRoiMetrics.definitions.push({{key, label: String(label), source: sourceName, origin: "upload"}});
   for (let roi = 0; roi < data.nRois; roi++) data.customRoiMetrics.values[roi][key] = metricValues[roi];
 }}
+const RETIRED_ROI_INDEX_COLUMNS = ["suite2p_index", "roi", "index"];
+function roiIndexColumn(headers) {{
+  // roi_index is the only accepted name; a former name is rejected instead of read as a metric.
+  const lower = headers.map(value => String(value).trim().toLowerCase());
+  const found = lower.indexOf("roi_index");
+  if (found >= 0) return found;
+  const retired = lower.findIndex(value => RETIRED_ROI_INDEX_COLUMNS.includes(value));
+  if (retired >= 0) throw new Error(`The ROI index column must be named roi_index; rename the column "${{headers[retired]}}".`);
+  return -1;
+}}
 function loadCustomMetricRows(rows, sourceName) {{
   if (rows.length < 2) throw new Error("Expected a header row and one row per ROI.");
   const headers = rows[0].map(value => value.trim());
-  const lowerHeaders = headers.map(value => value.toLowerCase());
-  let indexCol = -1;
-  for (const name of ["suite2p_index", "roi", "roi_index", "index"]) {{
-    const found = lowerHeaders.indexOf(name);
-    if (found >= 0) {{ indexCol = found; break; }}
-  }}
+  const indexCol = roiIndexColumn(headers);
   const roiIndexValues = indexCol >= 0 ? rows.slice(1).map(row => row[indexCol]) : null;
   for (let col = 0; col < headers.length; col++) {{
     if (col === indexCol) continue;
@@ -3306,12 +3385,8 @@ function loadCustomMetricJson(text, sourceName) {{
   if (Array.isArray(metrics)) {{
     if (!metrics.length || typeof metrics[0] !== "object") throw new Error("JSON row list must contain objects.");
     const headers = Array.from(new Set(metrics.flatMap(row => Object.keys(row))));
-    const lowerHeaders = headers.map(value => value.toLowerCase());
-    let indexHeader = null;
-    for (const name of ["suite2p_index", "roi", "roi_index", "index"]) {{
-      const found = lowerHeaders.indexOf(name);
-      if (found >= 0) {{ indexHeader = headers[found]; break; }}
-    }}
+    const indexPosition = roiIndexColumn(headers);
+    const indexHeader = indexPosition >= 0 ? headers[indexPosition] : null;
     const roiIndexValues = indexHeader ? metrics.map(row => row[indexHeader]) : null;
     for (const header of headers) {{
       if (header === indexHeader) continue;
@@ -3325,7 +3400,8 @@ function loadCustomMetricJson(text, sourceName) {{
   for (const [name, values] of Object.entries(metrics)) {{
     if (Array.isArray(values)) addCustomMetricDefinition(name, values, sourceName);
     else if (values && typeof values === "object" && Array.isArray(values.values)) {{
-      addCustomMetricDefinition(values.label || name, values.values, values.source || sourceName, values.suite2p_index || null);
+      roiIndexColumn(Object.keys(values));
+      addCustomMetricDefinition(values.label || name, values.values, values.source || sourceName, values.roi_index || null);
     }}
   }}
 }}
@@ -3369,11 +3445,8 @@ function loadCategoryRows(rowObjects, sourceName) {{
     const found = lowerHeaders.indexOf(name);
     if (found >= 0) {{ labelHeader = headers[found]; break; }}
   }}
-  let indexHeader = null;
-  for (const name of ["suite2p_index", "roi", "roi_index", "index"]) {{
-    const found = lowerHeaders.indexOf(name);
-    if (found >= 0) {{ indexHeader = headers[found]; break; }}
-  }}
+  const indexPosition = roiIndexColumn(headers);
+  const indexHeader = indexPosition >= 0 ? headers[indexPosition] : null;
   if (!codeHeader && !labelHeader) throw new Error("Expected cell_identity_code/cell_identity_label keys (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
   const nextLabels = new Array(data.nRois).fill(null);
   const labelMap = {{}};
@@ -3410,7 +3483,7 @@ function loadCellTypeTableText(text, sourceName) {{
     return;
   }}
   const rows = parseDelimitedRows(text);
-  if (rows.length < 2) throw new Error("Expected a header row and one row per original Suite2p ROI.");
+  if (rows.length < 2) throw new Error("Expected a header row and one row per ROI.");
   const headers = rows[0].map(value => value.trim().toLowerCase());
   let codeIndex = headers.indexOf("cell_identity_code");
   if (codeIndex < 0) codeIndex = headers.indexOf("category_code");
@@ -3418,10 +3491,7 @@ function loadCellTypeTableText(text, sourceName) {{
   let labelIndex = headers.indexOf("cell_identity_label");
   if (labelIndex < 0) labelIndex = headers.indexOf("category_label");
   if (labelIndex < 0) labelIndex = headers.indexOf("cell_type_label");
-  let suite2pIndex = headers.indexOf("suite2p_index");
-  if (suite2pIndex < 0) suite2pIndex = headers.indexOf("roi");
-  if (suite2pIndex < 0) suite2pIndex = headers.indexOf("roi_index");
-  if (suite2pIndex < 0) suite2pIndex = headers.indexOf("index");
+  const suite2pIndex = roiIndexColumn(headers);
   if (codeIndex < 0 && labelIndex < 0) throw new Error("Expected cell_identity_code/cell_identity_label columns (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
   const nextLabels = new Array(data.nRois).fill(null);
   const labelMap = {{}};
@@ -5595,7 +5665,7 @@ function metricSpreadsheetRows() {{
 }}
 function metricSpreadsheetCsv(rowsData = metricSpreadsheetRows()) {{
   const customHeaders = customMetricDefinitions().flatMap(definition => definition.categories ? [`custom_${{definition.key}}`, `custom_${{definition.key}}_label`] : [`custom_${{definition.key}}`]);
-  const csvHeader = ["suite2p_index","manual_label","cell_identity_label","cell_identity_code","roi_model_score_state","roi_model_score_probability","footprint","skew","aspect_ratio","compact","connectivity","roi_area_px","snr_95_50","caiman_exceptional_event_snr","inferred_spike_snr","inferred_spike_rise_tau_seconds","inferred_spike_decay_tau_seconds", ...customHeaders, "reason"];
+  const csvHeader = ["roi_index","manual_label","cell_identity_label","cell_identity_code","roi_model_score_state","roi_model_score_probability","footprint","skew","aspect_ratio","compact","connectivity","roi_area_px","snr_95_50","caiman_exceptional_event_snr","inferred_spike_snr","inferred_spike_rise_tau_seconds","inferred_spike_decay_tau_seconds", ...customHeaders, "reason"];
   const csvRows = rowsData.map(row => [
     row.suite2p, row.label, row.categoryLabel, row.categoryCode ?? "", row.roiModelScoreState, fmt(row.roiModelScoreProbability), fmt(row.footprint), fmt(row.skew), fmt(row.aspect), fmt(row.compact),
     row.connectivity, fmt(row.roiArea), fmt(row.snr9550), fmt(row.postdocSnr),
@@ -5640,7 +5710,7 @@ function openMetricSpreadsheet() {{
   }}</tr>`).join("");
   const csv = metricSpreadsheetCsv(rowsData);
   const win = window.open("", "_blank");
-  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:8px 0 12px;padding:6px 10px}}.metric-table-wrap{{max-height:80vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}.metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}.metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td:nth-child(1),.metric-table td:nth-child(2),.metric-table td:nth-child(3),.metric-table td:nth-child(4),.metric-table td:nth-child(5),.metric-table td:last-child{{text-align:left}}.metric-fail,.label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}</style><h1>${{data.session}} ROI metric spreadsheet</h1><p>filter_set: ${{loadedFilterSetName() || "none"}}</p><p>cell_identity_label_source: ${{data.cellTypeLabelSource || "not loaded"}}</p><p>roi_model_score_label_source: ${{data.roiModelLabelSource || "not loaded"}}</p><p>roi_model_score_source: ${{data.roiModelScoreSource || "not loaded"}}</p><button id="downloadCsv">Download CSV</button><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>suite2p_index</th><th>manual_label</th><th>cell_identity_label</th><th>cell_identity_code</th><th>roi_model_score_state</th><th>roi_model_score_probability</th><th>footprint</th><th>skew</th><th>aspect_ratio</th><th>compact</th><th>connectivity</th><th>roi_area_px</th><th>snr_95_50</th><th>caiman_exceptional_event_snr</th><th>inferred_spike_snr</th><th>inferred_spike_rise_tau_seconds</th><th>inferred_spike_decay_tau_seconds</th>${{customHeaders}}<th>reason</th></tr></thead><tbody>${{rows}}</tbody></table></div><script>const csv = ${{JSON.stringify(csv)}}; document.getElementById("downloadCsv").addEventListener("click", () => {{ const blob = new Blob([csv], {{type: "text/csv"}}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "${{data.session}}_roi_metric_spreadsheet.csv"; a.click(); URL.revokeObjectURL(a.href); }});<\\/script>`);
+  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:8px 0 12px;padding:6px 10px}}.metric-table-wrap{{max-height:80vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}.metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}.metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td:nth-child(1),.metric-table td:nth-child(2),.metric-table td:nth-child(3),.metric-table td:nth-child(4),.metric-table td:nth-child(5),.metric-table td:last-child{{text-align:left}}.metric-fail,.label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}</style><h1>${{data.session}} ROI metric spreadsheet</h1><p>filter_set: ${{loadedFilterSetName() || "none"}}</p><p>cell_identity_label_source: ${{data.cellTypeLabelSource || "not loaded"}}</p><p>roi_model_score_label_source: ${{data.roiModelLabelSource || "not loaded"}}</p><p>roi_model_score_source: ${{data.roiModelScoreSource || "not loaded"}}</p><button id="downloadCsv">Download CSV</button><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>roi_index</th><th>manual_label</th><th>cell_identity_label</th><th>cell_identity_code</th><th>roi_model_score_state</th><th>roi_model_score_probability</th><th>footprint</th><th>skew</th><th>aspect_ratio</th><th>compact</th><th>connectivity</th><th>roi_area_px</th><th>snr_95_50</th><th>caiman_exceptional_event_snr</th><th>inferred_spike_snr</th><th>inferred_spike_rise_tau_seconds</th><th>inferred_spike_decay_tau_seconds</th>${{customHeaders}}<th>reason</th></tr></thead><tbody>${{rows}}</tbody></table></div><script>const csv = ${{JSON.stringify(csv)}}; document.getElementById("downloadCsv").addEventListener("click", () => {{ const blob = new Blob([csv], {{type: "text/csv"}}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "${{data.session}}_roi_metric_spreadsheet.csv"; a.click(); URL.revokeObjectURL(a.href); }});<\\/script>`);
   win.document.close();
 }}
 function customCategoryName(definition, value) {{
@@ -6505,8 +6575,8 @@ def main() -> None:
             "Path to ROI-level custom metrics to embed in the reviewer. Can be repeated. "
             "Supported formats: CSV/TSV/JSON with one numeric value per ROI per metric, "
             "or NPY/NPZ arrays shaped (n_rois,) or (n_rois, n_metrics). CSV/TSV/JSON may "
-            "include suite2p_index/roi/roi_index/index to map rows by original ROI index; "
-            "otherwise row order is used."
+            "include a roi_index column (the 0-based original ROI index) to map rows to ROIs; "
+            "otherwise row k is ROI k."
         ),
     )
     parser.add_argument(
