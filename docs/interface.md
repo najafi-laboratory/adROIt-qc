@@ -102,10 +102,10 @@ ROIs is done. Visibility is applied after the metric filters, so the two compose
 ### Bulk labeling
 
 <div class="screenshot" markdown>
-![The Label all visible ROIs dialog.](img/bulk-labeling.png)
+![The Bulk labeling menu.](img/bulk-labeling.png)
 </div>
 
-`Label all as` applies one label to every currently visible ROI. A filter plus a bulk
+The **Bulk labeling menu** has two parts. **Label all visible ROIs as ...** applies one label, including Not labeled, to every currently visible ROI; **Assign Labels to Metric Ranges** labels ROIs from ranges of one metric (see [Assigning labels to metric ranges](interface-reference.md#assigning-labels-to-metric-ranges)). A filter plus a bulk
 label is therefore a recorded, reproducible decision rather than a long click sequence.
 
 ### Export

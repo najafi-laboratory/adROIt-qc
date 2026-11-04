@@ -2339,6 +2339,8 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .save-options {{ display: grid; gap: 10px; margin-top: 10px; }}
 .bulk-label-controls {{ display: grid; gap: 8px; margin-top: 10px; justify-items: start; }}
 .bulk-label-controls select {{ width: auto; min-width: 160px; }}
+.bulk-label-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
+.bulk-label-row select {{ margin-left: 6px; }}
 dialog {{ width: min(980px, calc(100vw - 40px)); border: 1px solid #d0d5dd; border-radius: 8px; padding: 14px; box-shadow: 0 24px 60px rgba(16,24,40,.24); }}
 dialog::backdrop {{ background: rgba(15,23,42,.38); }}
 button, input, select {{ font: inherit; }}
@@ -2577,27 +2579,6 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_decay_tau_seconds" data-min="oasisDecayTauMin" data-max="oasisDecayTauMax" aria-label="Inferred spike decay tau distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="inferred_spike"></div>
-      <div class="filter-subsection-title source-heading">
-        <span>Assign Labels to Metric Ranges</span>
-        <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
-      </div>
-      <div id="rangeLabelHelp" class="info-box" hidden>
-        <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds; ROIs outside every range are left unchanged. <strong>Good/bad/unsure labels</strong> sets review labels directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric.</p>
-        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#assigning-labels-to-metric-ranges" target="_blank" rel="noopener noreferrer">Range labels in full</a></p>
-      </div>
-      <div class="range-label-controls">
-        <label>Metric <select id="rangeLabelMetric"></select></label>
-        <label>Assign <select id="rangeLabelMode"><option value="gbu">Good/bad/unsure labels</option><option value="variable">New variable</option></select></label>
-        <label id="rangeLabelVariableNameLabel" hidden>Variable name <input id="rangeLabelVariableName" type="text" placeholder="e.g. score_class"></label>
-        <label id="rangeLabelOnlyUnlabeledLabel" class="inline-check"><input id="rangeLabelOnlyUnlabeled" type="checkbox"> Only change ROIs that are not labeled</label>
-      </div>
-      <div id="rangeLabelRows" class="range-label-rows"></div>
-      <div class="range-label-actions">
-        <button id="addRangeLabelRow" type="button">Add range</button>
-        <button id="fillModelRanges" type="button">Use model score thresholds</button>
-        <button id="applyRangeLabels" type="button">Assign labels</button>
-      </div>
-      <div id="rangeLabelStatus" class="note"></div>
       <div class="filter-subsection-title">Save Filter Sets</div>
       <div class="source-heading">
         <span class="note">Save the current thresholds as a named filter set for reuse, or keep it in a copy of this HTML.</span>
@@ -2718,22 +2699,48 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
   </dialog>
   <dialog id="labelAllDialog">
     <div class="dialog-header">
-      <div class="dialog-title">Label all visible ROIs as ...</div>
+      <div class="dialog-title">Bulk labeling menu</div>
       <button id="closeLabelAllDialogTop" class="dialog-close" type="button" aria-label="Close">&times;</button>
     </div>
-    <div class="note">This applies only to the ROIs currently visible in the reviewer.</div>
-    <div class="bulk-label-controls">
-      <label>Label
-        <select id="labelAllValue">
-          <option value="1">Good</option>
-          <option value="0">Bad</option>
-          <option value="2">Unsure</option>
-          <option value="-1">Not labeled</option>
-        </select>
-      </label>
+    <div class="dialog-section">
+      <div class="dialog-section-title">Label all visible ROIs as ...</div>
+      <div class="note">This applies only to the ROIs currently visible in the reviewer.</div>
+      <div class="bulk-label-controls bulk-label-row">
+        <label>Label
+          <select id="labelAllValue">
+            <option value="1">Good</option>
+            <option value="0">Bad</option>
+            <option value="2">Unsure</option>
+            <option value="-1">Not labeled</option>
+          </select>
+        </label>
+        <button id="applyLabelAll" type="button">Apply</button>
+      </div>
+    </div>
+    <div class="dialog-section">
+        <div class="dialog-section-title source-heading">
+          <span>Assign Labels to Metric Ranges</span>
+          <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
+        </div>
+        <div id="rangeLabelHelp" class="info-box" hidden>
+          <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds; ROIs outside every range are left unchanged. <strong>Review labels</strong> sets Good, Bad, Unsure or Not labeled directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric.</p>
+          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#assigning-labels-to-metric-ranges" target="_blank" rel="noopener noreferrer">Range labels in full</a></p>
+        </div>
+        <div class="range-label-controls">
+          <label>Metric <select id="rangeLabelMetric"></select></label>
+          <label>Assign <select id="rangeLabelMode"><option value="gbu">Review labels</option><option value="variable">New variable</option></select></label>
+          <label id="rangeLabelVariableNameLabel" hidden>Variable name <input id="rangeLabelVariableName" type="text" placeholder="e.g. score_class"></label>
+          <label id="rangeLabelOnlyUnlabeledLabel" class="inline-check"><input id="rangeLabelOnlyUnlabeled" type="checkbox"> Only change ROIs that are not labeled</label>
+        </div>
+        <div id="rangeLabelRows" class="range-label-rows"></div>
+        <div class="range-label-actions">
+          <button id="addRangeLabelRow" type="button">Add range</button>
+          <button id="fillModelRanges" type="button">Use model score thresholds</button>
+          <button id="applyRangeLabels" type="button">Assign labels</button>
+        </div>
+        <div id="rangeLabelStatus" class="note"></div>
     </div>
     <div class="dialog-actions">
-      <button id="applyLabelAll" type="button">Apply</button>
       <button id="closeLabelAllDialog" type="button">Close</button>
     </div>
   </dialog>
@@ -2910,7 +2917,7 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
               <button id="markUnsure" class="unsure">Unsure (U)</button>
               <button id="markUnlabeled" class="unlabeled">Not labeled (N)</button>
             </div>
-            <button id="openLabelAllDialog" type="button">Label all as ...</button>
+            <button id="openLabelAllDialog" type="button">Bulk labeling menu</button>
             <div class="nav-row">
               <button id="previousRoi" class="nav-button" title="Previous visible ROI (Left arrow)">&#8592; Previous</button>
               <button id="nextRoi" class="nav-button" title="Next visible ROI (Right arrow)">Next &#8594;</button>
@@ -6115,17 +6122,17 @@ function renderRangeTargets() {{
     let control;
     if (mode === "gbu") {{
       control = document.createElement("select");
-      for (const [value, text] of [["1", "Good"], ["0", "Bad"], ["2", "Unsure"]]) {{
+      for (const [value, text] of [["1", "Good"], ["0", "Bad"], ["2", "Unsure"], ["-1", "Not labeled"]]) {{
         const option = document.createElement("option");
         option.value = value; option.textContent = text;
         control.appendChild(option);
       }}
-      if (["1", "0", "2"].includes(String(kept))) control.value = String(kept);
+      if (["1", "0", "2", "-1"].includes(String(kept))) control.value = String(kept);
     }} else {{
       control = document.createElement("input");
       control.type = "text";
       control.placeholder = `range ${{index + 1}}`;
-      control.value = ["1", "0", "2"].includes(String(kept)) ? "" : (kept || "");
+      control.value = ["1", "0", "2", "-1"].includes(String(kept)) ? "" : (kept || "");
     }}
     control.className = "range-target";
     control.addEventListener("change", () => {{ row.dataset.target = control.value; }});
@@ -6212,7 +6219,7 @@ function applyRangeLabels() {{
   const mode = rangeLabelMode();
   if (mode === "gbu") {{
     const onlyUnlabeled = document.getElementById("rangeLabelOnlyUnlabeled").checked;
-    const counts = {{1: 0, 0: 0, 2: 0}};
+    const counts = {{1: 0, 0: 0, 2: 0, "-1": 0}};
     let outside = 0, skipped = 0;
     for (let roi = 0; roi < data.nRois; roi++) {{
       const k = matchRangeRow(Number(metricValue(roi, metric)), ranges);
@@ -6224,7 +6231,7 @@ function applyRangeLabels() {{
     }}
     updateLabelControls();
     updateVisibleRois(true);
-    say(`Labeled ${{counts[1].toLocaleString()}} good, ${{counts[0].toLocaleString()}} bad and ${{counts[2].toLocaleString()}} unsure from ${{metricLabel(metric)}}; ${{outside.toLocaleString()}} ROIs were outside every range or had no value${{skipped ? `, and ${{skipped.toLocaleString()}} already labeled ROIs were left as they were` : ""}}.`);
+    say(`Labeled ${{counts[1].toLocaleString()}} good, ${{counts[0].toLocaleString()}} bad, ${{counts[2].toLocaleString()}} unsure and ${{counts[-1].toLocaleString()}} not labeled from ${{metricLabel(metric)}}; ${{outside.toLocaleString()}} ROIs were outside every range or had no value${{skipped ? `, and ${{skipped.toLocaleString()}} already labeled ROIs were left as they were` : ""}}.`);
     return;
   }}
   const name = document.getElementById("rangeLabelVariableName").value.trim();

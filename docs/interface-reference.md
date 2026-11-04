@@ -269,7 +269,8 @@ selected ROI's display and diagnostics, not these metrics.
 
 ## Assigning labels to metric ranges
 
-**Assign Labels to Metric Ranges** labels every ROI whose value of one metric
+**Assign Labels to Metric Ranges**, in the **Bulk labeling menu** under the
+label buttons, labels every ROI whose value of one metric
 falls in a range you set. For example, you could label ROIs good for a model
 probability of 0.85 or more, bad for 0.15 or less and unsure in between.
 **Use model score thresholds** fills in exactly these, from the thresholds
@@ -286,8 +287,8 @@ Each range works as follows:
 
 There are two ways to apply the ranges:
 
-- **Good/bad/unsure labels** sets the review labels directly, as the G/B/U keys
-  do.
+- **Review labels** sets Good, Bad, Unsure or Not labeled directly, as the
+  G/B/U/N keys do.
 - **New variable** adds an uploaded ROI metric with the name you give. Its
   value is the number of the matching range (1 for the first, 2 for the second,
   and so on, blank outside every range), and each range's name is kept for the
