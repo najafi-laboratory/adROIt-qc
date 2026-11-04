@@ -79,7 +79,7 @@ That depends on how the page is opened, not on the reviewer:
 
 | How you open the HTML | Address starts with | Sidecars |
 |:---|:---|:---|
-| Through a web address: a Globus collection with HTTPS access, Open OnDemand, or `python -m http.server` run in the folder | `https://` or `http://` | Load automatically, as long as they sit in the same folder as the HTML |
+| Through a web server, for example `python -m http.server` run in the folder | `https://` or `http://` | Load automatically, as long as they sit in the same folder as the HTML |
 | By double-clicking it, or from any downloaded, copied or mounted folder | `file://` | Not loaded. Browsers do not let a page opened from disk read files beside it, so select them with **Load dF/F file** and **Load inferred spikes file** |
 
 To serve a folder on your own machine, so both arrays load by themselves:

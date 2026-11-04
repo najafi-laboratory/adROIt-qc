@@ -10,28 +10,31 @@ the matching section below, which has the full description.
 - **Exponential model:** a decay curve drawn from the average transient's peak
   using the empirical decay tau. That tau is the time the average transient
   takes to fall to 1/e of its peak amplitude.
-- **Amplitude threshold:** only inferred spike amplitudes above the selected
+- **Threshold:** only frames whose inferred-spike value is above the selected
   threshold contribute to the average transient.
 
 The panel can be hidden with its **Hide** button and shown again from the dF/F
 panel.
 
-## Inferred spike amplitude threshold
+## Inferred spike threshold
 
-Inferred spikes are loaded as an ROI-by-frame amplitude array. The viewer only
-requires that array's shape and meaning, whatever method produced it, and says
-which method produced it when the file records that. The values are inferred
-spike amplitudes, not spike probabilities: larger values mean the inference
-method assigned a stronger spike-like transient at that frame.
+Inferred spikes are loaded as an ROI-by-frame array. The viewer requires only that
+array's shape, so it can hold any per-frame spike estimate from any method:
+deconvolved amplitudes (for example from Suite2p's OASIS), spike probabilities
+(for example from CASCADE), or 0/1 event indicators. The reviewer says
+which method produced the array when the file records it.
 
-The amplitude threshold is a cutoff applied in the viewer. Frames with an
-inferred spike amplitude above it are drawn as red dots on the dF/F trace and
-are used for the average transient and the decay and rise taus. For Suite2p and
-OASIS output, see
+The threshold is a cutoff applied in the viewer, in the units of that array. Frames
+whose value is above it are drawn as red dots on the dF/F trace and are used for the
+average transient and the decay and rise taus, so set it to suit the method: for
+example 0.5 for spike probabilities or 0/1 events. For Suite2p and OASIS output, see
 [Suite2p's spike deconvolution documentation](https://suite2p.readthedocs.io/en/latest/deconvolution/)
 and the [original OASIS paper](https://doi.org/10.1371/journal.pcbi.1005423).
 
 ## Loading dF/F and inferred spike files
+
+The dF/F panel's single **Read more** box covers this section and
+[Inferred spike threshold](#inferred-spike-threshold).
 
 For larger sessions the dF/F and inferred-spike arrays are stored beside the
 HTML rather than inside it. Opened through a web address they load
@@ -81,8 +84,8 @@ ROI.
 
 These plots group every ROI in the session by its current label and update as
 you label. ROIs that a metric filter labeled Bad are counted as Bad. The panel
-is hidden when a reviewer opens; show it with **Show summary of good/bad/unsure
-ROIs** in the dF/F panel, and hide it again with its **Hide** button.
+is hidden when a reviewer opens; show it with **Show Summary by QC Label** at
+the top of the dF/F panel, and hide it again with its **Hide** button.
 
 - **Fraction of ROIs by label:** the share of all ROIs in the session with each
   label (Good, Bad, Unsure and Not labeled), with the count above each bar.
@@ -258,10 +261,10 @@ and the [Metric reference](metrics.md).
 
 The inferred spike metrics are computed from dF/F windows around inferred spike
 amplitudes above the threshold set when the reviewer was generated. They are
-computed by `_oasis_event_waveform_metrics` in the generator. The current
-pipeline produces inferred spike amplitudes with Suite2p/OASIS, but these
-metrics only need an ROI-by-frame inferred spike amplitude array in the
-documented format. Changing the amplitude threshold in the viewer updates the
+computed by `_oasis_event_waveform_metrics` in the generator. The laboratory's
+pipeline produces Suite2p/OASIS amplitudes, but these metrics only need an
+ROI-by-frame inferred-spike array in the documented format, whatever method
+produced it. Changing the amplitude threshold in the viewer updates the
 selected ROI's display and diagnostics, not these metrics.
 
 ## Assigning labels to metric ranges

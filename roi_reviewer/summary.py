@@ -844,6 +844,13 @@ def _custom_metric_key(name: str) -> str:
     return key
 
 
+def _source_name(source: Any) -> Any:
+    """File name only for a source path, so a shared reviewer does not embed the machine's paths."""
+    if isinstance(source, (str, Path)) and ("/" in str(source) or "\\" in str(source)):
+        return Path(str(source)).name
+    return source
+
+
 def _json_safe(value: Any) -> Any:
     """Replace NaN and infinities with None, recursively, so the payload is valid JSON.
 
@@ -2108,11 +2115,11 @@ def _write_html(
         "iscell": _float64_b64(iscell),
         "morphology": morphology_metrics,
         "cellTypeLabels": cell_type_labels,
-        "cellTypeLabelSource": cell_type_label_source,
+        "cellTypeLabelSource": _source_name(cell_type_label_source),
         "roiModelLabels": roi_model_scores_labels,
         "roiModelLabelSource": roi_model_score_label_source,
         "roiModelScores": roi_model_scores,
-        "roiModelScoreSource": roi_model_score_source,
+        "roiModelScoreSource": _source_name(roi_model_score_source),
         "customRoiMetrics": custom_roi_metrics,
         "presetExclusionReasons": preset_exclusion_reasons,
         "qcParameters": qc_parameters,
@@ -2179,7 +2186,7 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
         '</div>'
         '</div>'
         '<div id="oasisDiagnosticsHelp" class="info-box" hidden>'
-        '<p>The blue line averages the selected ROI&apos;s baseline-subtracted dF/F around every inferred spike above the amplitude threshold. The red curve is an exponential decay from its peak with the empirical decay tau, the time the average takes to fall to 1/e of its peak.</p>'
+        '<p>The blue line averages the selected ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold. The red curve is an exponential decay from its peak with the empirical decay tau, the time the average takes to fall to 1/e of its peak.</p>'
         '<p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>'
         '</div>'
         '<div class="oasis-diagnostics-body">'
@@ -2280,7 +2287,9 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .sort-header {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
 .sort-current {{ color: #667085; font-size: 14px; }}
 .trace-header-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }}
-.trace-header-controls {{ display: none; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; font-size: 14px; }}
+.trace-header-controls {{ display: none; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; font-size: 14px; }}
+.trace-summary-toggle {{ flex: 0 0 auto; white-space: nowrap; margin-left: auto; font-size: 14px; }}
+.info-box .info-source {{ color: #475569; font-size: 13px; }}
 .trace-header-controls.visible {{ display: flex; }}
 .trace-header-controls button {{ flex: 0 0 auto; white-space: nowrap; }}
 .filter-controls {{ display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; align-items: end; }}
@@ -2553,7 +2562,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="inferredSpikeMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="inferredSpikeMetricSources" class="info-box" hidden>
-        <p>These metrics are computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated, from any ROI-by-frame inferred spike amplitude array. Changing the amplitude threshold in the viewer updates only the selected ROI's display.</p>
+        <p>These metrics are computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated, from any ROI-by-frame inferred-spike array, whatever method produced it. Changing the threshold in the viewer updates only the selected ROI's display.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-metrics" target="_blank" rel="noopener noreferrer">Inferred spike metrics in full</a></p>
       </div>
       <div class="filter-controls">
@@ -2810,6 +2819,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       <div class="panel">
         <div class="trace-header-row">
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
+          <button id="toggleGbuSummary" type="button" class="trace-summary-toggle">Show Summary by QC Label</button>
           <div class="trace-header-controls" id="traceOasisControls">
             <label class="oasis-toggle"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
             <label>Amplitude threshold</label>
@@ -2819,31 +2829,27 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             </div>
             <button id="resetOasisThreshold" type="button">Reset to ROI default</button>
             <button id="toggleOasisDiagnostics" type="button">Show inferred spike fit metrics</button>
-            <button id="toggleGbuSummary" type="button">Show summary of good/bad/unsure ROIs</button>
-            <button class="info-button" type="button" data-info-target="oasisThresholdInfo" aria-expanded="false">Read more</button>
           </div>
         </div>
-        <div id="oasisThresholdInfo" class="info-box" hidden>
-          <p><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span> Values are inferred spike amplitudes, not probabilities, and frames above the amplitude threshold are drawn as red dots and used for the average transient and taus.</p>
-          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-amplitude-threshold" target="_blank" rel="noopener noreferrer">Inferred spikes and the threshold in full</a></p>
-          <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
-          <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
-        </div>
+        
         <div class="trace-loader" id="traceLoader" style="display:none;">
           <input id="dffFile" type="file" accept=".npy">
           <input id="oasisFile" type="file" accept=".npy">
           <button id="loadDffFile">Load dF/F file</button>
           <button id="loadOasisFile" type="button">Load inferred spikes file</button>
-          <button class="info-button" type="button" data-info-target="traceFileHelp" aria-expanded="false">Read more</button>
+          <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
         </div>
-        <div id="traceFileHelp" class="info-box" hidden>
-          <p>Larger sessions keep dF/F and inferred spikes beside this HTML; they load automatically through a web address, or from disk with these buttons. Each is a float32 <code>.npy</code> array of shape (ROIs, frames) in original-index order, named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> to load automatically.</p>
+        <div id="traceHelp" class="info-box" hidden>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically through a web address when named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside this HTML, or from disk with the load buttons.</p>
+          <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
 # one row per ROI in original-index order, one column per frame
 np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))            # (n_rois, n_frames)
 np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape</pre>
-          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#loading-dff-and-inferred-spike-files" target="_blank" rel="noopener noreferrer">File requirements in full</a></p>
+          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-threshold" target="_blank" rel="noopener noreferrer">Inferred spikes and the threshold</a> &middot; <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#loading-dff-and-inferred-spike-files" target="_blank" rel="noopener noreferrer">Loading dF/F and inferred spike files</a></p>
+          <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
+          <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
         <div class="note" id="traceLoadNote"></div>
         <canvas id="traceCanvas"></canvas>
@@ -3099,7 +3105,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
 // Sidecars load by fetch() relative to this page, which browsers allow over http(s) but not
 // for a page opened from disk (file://). The notes below say which case applies.
 const openedFromDisk = window.location.protocol === "file:";
-const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Select the .npy file(s) with the buttons above, or open this page through a web address instead (a Globus HTTPS link, Open OnDemand, or python -m http.server run in this folder), where they load automatically.";
+const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Select the .npy file(s) with the buttons above, or open this page through a web server (an http:// or https:// address), where they load automatically.";
 function updateSidecarLoadNote() {{
   const note = document.getElementById("traceLoadNote");
   const parts = [];
@@ -5177,7 +5183,7 @@ function setGbuSummaryVisible(show) {{
   const button = document.getElementById("toggleGbuSummary");
   if (!panel) return;
   panel.classList.toggle("minimized", !show);
-  if (button) button.textContent = show ? "Hide summary of good/bad/unsure ROIs" : "Show summary of good/bad/unsure ROIs";
+  if (button) button.textContent = show ? "Hide Summary by QC Label" : "Show Summary by QC Label";
   updateFovSideLayout();
   if (show) scheduleGbuSummaryDraw();
 }}
