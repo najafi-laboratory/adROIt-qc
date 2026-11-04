@@ -2148,6 +2148,7 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
         '<div class="oasis-diagnostics-header">'
         '<div class="title">Selected ROI inferred spike fit metrics</div>'
         '<div class="oasis-diagnostics-actions">'
+        '<button id="oasisDiagnosticsHide" type="button" title="Hide this panel; show it again from the dF/F panel">Hide</button>'
         '<button id="oasisDiagnosticsInfo" class="info-button" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false">Read more</button>'
         '</div>'
         '</div>'
@@ -2341,6 +2342,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .oasis-diagnostics-header {{ display: flex; gap: 8px; align-items: center; justify-content: space-between; }}
 .oasis-diagnostics-actions {{ display: flex; gap: 6px; align-items: center; }}
 .oasis-diagnostics.minimized {{ display: none; }}
+.gbu-summary.minimized {{ display: none; }}
+.fov-side.empty {{ display: none; }}
 .oasis-diagnostics .note {{ margin-bottom: 6px; }}
 #oasisTransientCanvas {{ height: 220px; }}
 .fov-side {{ display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 600px; min-width: 0; }}
@@ -2780,7 +2783,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             <div class="panel gbu-summary">
               <div class="oasis-diagnostics-header">
                 <div class="title">Summary of good/bad/unsure ROIs</div>
-                <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" aria-expanded="true" aria-controls="gbuSummaryBody">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
+                <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" title="Hide this panel; show it again from the dF/F panel">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
               </div>
               <div id="gbuSummaryHelp" class="info-box" hidden>
                 <p>These plots group every ROI in the session by its current label and update as you label. ROIs that a metric filter labeled Bad are counted as Bad.</p>
@@ -2815,6 +2818,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             </div>
             <button id="resetOasisThreshold" type="button">Reset to ROI default</button>
             <button id="toggleOasisDiagnostics" type="button">Show inferred spike fit metrics</button>
+            <button id="toggleGbuSummary" type="button">Hide summary of good/bad/unsure ROIs</button>
             <button class="info-button" type="button" data-info-target="oasisThresholdInfo" aria-expanded="false">Read more</button>
           </div>
         </div>
@@ -5166,6 +5170,26 @@ function setOasisDiagnosticsVisible(show) {{
   if (!panel) return;
   panel.classList.toggle("minimized", !show);
   if (button) button.textContent = show ? "Hide inferred spike fit metrics" : "Show inferred spike fit metrics";
+  updateFovSideLayout();
+  requestAnimationFrame(draw);
+}}
+function setGbuSummaryVisible(show) {{
+  const panel = document.querySelector(".gbu-summary");
+  const button = document.getElementById("toggleGbuSummary");
+  if (!panel) return;
+  panel.classList.toggle("minimized", !show);
+  if (button) button.textContent = show ? "Hide summary of good/bad/unsure ROIs" : "Show summary of good/bad/unsure ROIs";
+  updateFovSideLayout();
+  if (show) scheduleGbuSummaryDraw();
+}}
+// When both side panels are hidden, the field of view takes the full width.
+function updateFovSideLayout() {{
+  const side = document.querySelector(".fov-side");
+  const review = document.querySelector(".fov-review");
+  if (!side || !review) return;
+  const anyShown = [...side.querySelectorAll(".gbu-summary, .oasis-diagnostics")].some(p => !p.classList.contains("minimized"));
+  side.classList.toggle("empty", !anyShown);
+  review.classList.toggle("oasis-collapsed", !anyShown);
   requestAnimationFrame(draw);
 }}
 
@@ -5312,8 +5336,8 @@ function gbuKde(values, grid) {{
   }});
 }}
 function drawGbuSummary() {{
-  const body = document.getElementById("gbuSummaryBody");
-  if (body && body.hidden) return;  // collapsed: redrawn when shown again
+  const summaryPanel = document.querySelector(".gbu-summary");
+  if (summaryPanel && summaryPanel.classList.contains("minimized")) return;  // hidden: redrawn when shown again
   const counts = new Map([[1, 0], [0, 0], [2, 0], [-1, 0]]);
   for (const value of labels) {{
     const key = value === 1 || value === 0 || value === 2 ? value : -1;
@@ -5959,13 +5983,13 @@ if (oasisDiagnosticsPanel && toggleOasisDiagnostics) {{
 // Inferred-spike fit metrics are shown by default whenever spikes are available.
 if (data.oasisAvailable && oasisSpikes) setOasisDiagnosticsVisible(true);
 startGbuSummary();
-document.getElementById("gbuSummaryToggle")?.addEventListener("click", event => {{
-  const body = document.getElementById("gbuSummaryBody");
-  body.hidden = !body.hidden;
-  event.currentTarget.textContent = body.hidden ? "Show" : "Hide";
-  event.currentTarget.setAttribute("aria-expanded", String(!body.hidden));
-  if (!body.hidden) scheduleGbuSummaryDraw();
+document.getElementById("gbuSummaryToggle")?.addEventListener("click", () => setGbuSummaryVisible(false));
+document.getElementById("oasisDiagnosticsHide")?.addEventListener("click", () => setOasisDiagnosticsVisible(false));
+document.getElementById("toggleGbuSummary")?.addEventListener("click", () => {{
+  const panel = document.querySelector(".gbu-summary");
+  setGbuSummaryVisible(!!panel && panel.classList.contains("minimized"));
 }});
+updateFovSideLayout();
 ["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax","roiAreaMin","roiAreaMax","eventSnrMin","andreaPostdocSnrMin","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","roiModelScoreProbabilityMin","roiModelScoreProbabilityMax"].forEach(id => {{
   const element = document.getElementById(id);
   if (!element) return;
