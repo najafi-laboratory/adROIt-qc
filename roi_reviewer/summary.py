@@ -2278,6 +2278,10 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-label-controls {{ display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 8px; font-size: 14px; color: #475467; }}
 .range-label-controls input[type=text], .range-label-controls select {{ display: block; margin-top: 3px; }}
 .range-label-controls .inline-check {{ display: flex; gap: 6px; align-items: center; }}
+.range-label-controls select {{ min-width: 240px; }}
+[hidden] {{ display: none !important; }}
+.range-label-controls .inline-check input {{ width: auto; margin: 0; flex: none; }}
+.range-label-controls .inline-check {{ align-self: end; padding-bottom: 8px; }}
 .range-label-rows {{ display: grid; gap: 6px; margin-top: 8px; }}
 .range-label-row {{ display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(90px, auto) auto; gap: 8px; align-items: end; font-size: 14px; color: #475467; }}
 .range-label-row input, .range-label-row select {{ display: block; width: 100%; margin-top: 3px; box-sizing: border-box; }}
@@ -2405,7 +2409,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
         <p>The plot beside each metric's threshold fields is a histogram of that metric across all ROIs in this session, over its 1st to 99th percentile range. Plots are shown by default; click <strong>Distribution</strong> above a plot to hide it.</p>
-        <p>Vertical lines mark the thresholds, green for the minimum and red for the maximum, and they move as you type. If no threshold values are entered, the lines reflect the thresholds in the loaded filter set. If no filter set is loaded, or the loaded one has no value for a metric, starting values are used instead: the mean for skew, aspect ratio, compactness, both SNRs, inferred spike SNR and the model score minimum; the 25th and 75th percentiles for ROI area, inferred spike rise and decay tau and uploaded ROI metrics; and the 75th percentile for connectivity and the model score maximum. The value in parentheses beside a field is the one its line uses.</p>
+        <p>Vertical lines mark the thresholds, green for the minimum and red for the maximum, and they move as you type. If no threshold values are entered, the lines reflect the thresholds in the loaded filter set. If no filter set is loaded, or the loaded one has no value for a metric, starting values are used instead: the mean for skew, aspect ratio, compactness, both SNRs, inferred spike SNR and the ROI model probability minimum; the 25th and 75th percentiles for ROI area, inferred spike rise and decay tau and uploaded ROI metrics; and the 75th percentile for connectivity. The value in parentheses beside a field is the one its line uses.</p>
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Cell Identity Labels</span>
@@ -2429,22 +2433,23 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="category-filter-options" id="cellTypeFilterOptions">
         <span class="note">No cell identity labels loaded.</span>
       </div>
+      <div id="modelDerivedFilterSection">
       <div class="filter-subsection-title source-heading">
         <span>Model-Derived Metrics</span>
         <button class="info-button" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
-        <p>ROI model score probability is the trained classifier output for <code>p(good ROI)</code>, loaded from <code>roi_model_scores.h5</code> when available.</p>
+        <p>ROI model probability is the trained classifier output for <code>p(good ROI)</code>, loaded from <code>roi_model_scores.h5</code> when available.</p>
         <p>The currently registered trained model is intended for cerebellar dendrite ROIs only; use it as a target-specific suggestion, not a general ROI quality score for other structures.</p>
         <p>By default, these scores are suggestions for filtering/sorting and do not label ROIs on page load. If the summary was generated with label initialization enabled, probability greater than or equal to the good threshold opens as <strong>Good</strong>, probability less than or equal to the bad threshold opens as <strong>Bad</strong>, and probabilities between those thresholds open as <strong>Unsure</strong>.</p>
         <p>To label ROIs from score ranges in the open reviewer, use <strong>Assign Labels to Metric Ranges</strong> below.</p>
       </div>
-      <div class="filter-controls">
-        <label>ROI model score probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
-        <label>ROI model score probability max <span class="threshold-default" id="roiModelScoreProbabilityMaxDefault"></span><input id="roiModelScoreProbabilityMax" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" data-max="roiModelScoreProbabilityMax" aria-label="ROI model score probability distribution"></canvas></details>
+      <div class="filter-controls" id="modelScoreFilterControls">
+        <label>ROI model probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" aria-label="ROI model probability distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="model_derived"></div>
+      </div>
       <div class="filter-subsection-title source-heading">
         <span>Uploaded ROI Metrics</span>
         <button class="info-button" type="button" data-info-target="customMetricSources" aria-expanded="false">Read more</button>
@@ -2616,15 +2621,15 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L122-L158" target="_blank" rel="noopener noreferrer">SNR: 95/50 percentile calculation code</a></p>
       <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a></p>
       <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L470-L556" target="_blank" rel="noopener noreferrer">Inferred spike metric calculation code</a>: metrics are calculated from thresholded inferred-spike amplitude windows.</p>
-      <p>ROI model score probability is loaded from <code>roi_model_scores.h5</code> when available; the currently registered model is intended for cerebellar dendrite ROIs only unless another checkpoint is supplied.</p>
+      <p>ROI model probability is loaded from <code>roi_model_scores.h5</code> when available; the currently registered model is intended for cerebellar dendrite ROIs only unless another checkpoint is supplied.</p>
     </div>
     <div class="trace-sort">
       <div>
         <div class="note">Check one or more metrics. Multiple checked metrics are converted to 0-1 normalized values and summed with equal weight.</div>
         <div id="sortMetricList" class="sort-metric-list">
           <label><input type="checkbox" name="sortMetric" value="original" checked> <span class="roi-index-label">Original Suite2p index</span></label>
-          <div class="sort-metric-group">Model-Derived Metrics</div>
-          <label><input type="checkbox" name="sortMetric" value="roi_model_score_probability"> ROI model score probability</label>
+          <div class="sort-metric-group" id="modelDerivedSortGroup">Model-Derived Metrics</div>
+          <label id="modelScoreSortOption"><input type="checkbox" name="sortMetric" value="roi_model_score_probability"> ROI model probability</label>
           <div class="custom-sort-slot" data-section="model_derived"></div>
           <div class="sort-metric-group">Morphology Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="aspect"> Aspect ratio</label>
@@ -2684,7 +2689,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       </div>
       <div class="save-option">
         <button id="saveManualLabels">Export labels NPY (roi_manual_labels.npy)</button>
-        <span class="note">Exports a one-dimensional label array indexed by original Suite2p ROI.</span>
+        <span class="note">Exports a one-dimensional label array with one entry per ROI, in original-index order.</span>
       </div>
       <div class="save-option">
         <button id="saveCurrentFilters">Export current filter/sorting settings JSON</button>
@@ -3563,6 +3568,27 @@ function customMetricSection(definition) {{
 function customMetricSlot(section) {{
   return document.querySelector(`.custom-metric-slot[data-section="${{section}}"]`) || document.getElementById("customMetricFilterControls");
 }}
+function sessionHasModelScores() {{
+  return (data.roiModelScores || []).some(entry => entry && Number.isFinite(Number(entry.probability)));
+}}
+function updateModelDerivedVisibility() {{
+  // The model score controls appear only when the session has model scores; the section itself
+  // also stays visible when an uploaded metric has been placed in it.
+  const hasScores = sessionHasModelScores();
+  const filterSlot = document.querySelector('.custom-metric-slot[data-section="model_derived"]');
+  const sortSlot = document.querySelector('.custom-sort-slot[data-section="model_derived"]');
+  const scoreRow = document.getElementById("modelScoreFilterControls");
+  const sortOption = document.getElementById("modelScoreSortOption");
+  if (scoreRow) scoreRow.hidden = !hasScores;
+  if (sortOption) {{
+    sortOption.hidden = !hasScores;
+    if (!hasScores) sortOption.querySelector("input").checked = false;
+  }}
+  const filterSection = document.getElementById("modelDerivedFilterSection");
+  if (filterSection) filterSection.hidden = !hasScores && !(filterSlot && filterSlot.children.length);
+  const sortGroup = document.getElementById("modelDerivedSortGroup");
+  if (sortGroup) sortGroup.hidden = !hasScores && !(sortSlot && sortSlot.children.length);
+}}
 function renderCustomMetricControls() {{
   const kept = readCustomMetricFiltersFromInputs();
   document.querySelectorAll(".custom-metric-slot").forEach(slot => {{ slot.textContent = ""; }});
@@ -3642,6 +3668,7 @@ function renderCustomMetricControls() {{
     ? `${{total}} uploaded ROI metric(s) loaded${{moved ? `; ${{moved}} shown in other sections` : ""}}.`
     : "No uploaded ROI metrics loaded.";
   if (typeof refreshRangeMetricOptions === "function") refreshRangeMetricOptions();
+  updateModelDerivedVisibility();
 }}
 function readCustomMetricFiltersFromInputs() {{
   const values = {{}};
@@ -3682,6 +3709,7 @@ function renderCustomSortMetrics() {{
     label.appendChild(document.createTextNode(` ${{definition.label}}`));
     target.appendChild(label);
   }}
+  updateModelDerivedVisibility();
 }}
 function fit(canvas) {{
   const r = window.devicePixelRatio || 1, box = canvas.getBoundingClientRect();
@@ -3750,7 +3778,7 @@ function metricLabel(metric) {{
   if (metric === "oasis_rise_tau_seconds") return "inferred spike rise tau";
   if (metric === "oasis_decay_tau_seconds") return "inferred spike decay tau";
   if (metric === "cell_type_code") return "cell identity code";
-  if (metric === "roi_model_score_probability") return "ROI model score probability";
+  if (metric === "roi_model_score_probability") return "ROI model probability";
   if (metric === "roi_area") return "ROI area (px)";
   if (metric === "connectivity") return "Connectivity";
   if (metric === "skew") return "Skew";
@@ -3835,7 +3863,7 @@ function updateMetricDefaults() {{
   startFrom("oasisDecayTauMin", percentile(oasisDecayTau, 0.25), "25th pct");
   startFrom("oasisDecayTauMax", percentile(oasisDecayTau, 0.75), "75th pct");
   startFrom("roiModelScoreProbabilityMin", mean(roiModelProbability), "mean");
-  startFrom("roiModelScoreProbabilityMax", percentile(roiModelProbability, 0.75), "75th pct");
+  
   for (const definition of customMetricDefinitions()) {{
     const values = finiteMetricValues(`custom:${{definition.key}}`);
     const ids = customMetricFilterIds(definition.key);
@@ -3865,7 +3893,6 @@ function updateMetricDefaults() {{
   document.getElementById("oasisDecayTauMinDefault").textContent = oasisDecayTau.length ? referenceText("oasisDecayTauMin") : "";
   document.getElementById("oasisDecayTauMaxDefault").textContent = oasisDecayTau.length ? referenceText("oasisDecayTauMax") : "";
   document.getElementById("roiModelScoreProbabilityMinDefault").textContent = roiModelProbability.length ? referenceText("roiModelScoreProbabilityMin") : "";
-  document.getElementById("roiModelScoreProbabilityMaxDefault").textContent = roiModelProbability.length ? referenceText("roiModelScoreProbabilityMax") : "";
   configureOasisFilterControls();
 }}
 function configureOasisFilterControls() {{
@@ -4410,8 +4437,8 @@ function morphologyReasons(metrics, dffMetrics, filter, roi = null) {{
   if (!passesUpper(oasisRiseTau, filter.oasisRiseTauMax)) reasons.push(`inferred spike rise tau ${{fmt(oasisRiseTau)}} above ${{filter.oasisRiseTauMax}}`);
   if (!passesLower(oasisDecayTau, filter.oasisDecayTauMin)) reasons.push(`inferred spike decay tau ${{fmt(oasisDecayTau)}} below ${{filter.oasisDecayTauMin}}`);
   if (!passesUpper(oasisDecayTau, filter.oasisDecayTauMax)) reasons.push(`inferred spike decay tau ${{fmt(oasisDecayTau)}} above ${{filter.oasisDecayTauMax}}`);
-  if (!passesLower(roiModelProbability, filter.roiModelScoreProbabilityMin)) reasons.push(`ROI model score probability ${{fmt(roiModelProbability)}} below ${{filter.roiModelScoreProbabilityMin}}`);
-  if (!passesUpper(roiModelProbability, filter.roiModelScoreProbabilityMax)) reasons.push(`ROI model score probability ${{fmt(roiModelProbability)}} above ${{filter.roiModelScoreProbabilityMax}}`);
+  if (!passesLower(roiModelProbability, filter.roiModelScoreProbabilityMin)) reasons.push(`ROI model probability ${{fmt(roiModelProbability)}} below ${{filter.roiModelScoreProbabilityMin}}`);
+  if (!passesUpper(roiModelProbability, filter.roiModelScoreProbabilityMax)) reasons.push(`ROI model probability ${{fmt(roiModelProbability)}} above ${{filter.roiModelScoreProbabilityMax}}`);
   if (cellTypeFilter.length) {{
     const cellTypeValue = data.cellTypeLabels?.[roi];
     const passesCellType = cellTypeFilter.some(value =>
@@ -5869,6 +5896,7 @@ saveLabelsInfo.addEventListener("click", () => {{
   saveLabelsHelp.toggleAttribute("hidden", !shouldShow);
   saveLabelsInfo.setAttribute("aria-expanded", String(shouldShow));
 }});
+updateModelDerivedVisibility();
 document.querySelectorAll("[data-info-target]").forEach(button => {{
   button.addEventListener("click", () => {{
     const target = document.getElementById(button.dataset.infoTarget);
