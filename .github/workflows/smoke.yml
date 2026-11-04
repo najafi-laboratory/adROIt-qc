@@ -69,7 +69,13 @@ jobs:
           html = pathlib.Path(glob.glob("build/out/*_interactive_fov_roi_dff.html")[0]).read_text(errors="replace")
           for probe in ('"nRois":2', "Original Index", "referenceText"):
               assert probe in html, f"missing {probe!r} in generated reviewer"
-          print("reviewer contains the expected payload")
+          # the page reads its data with JSON.parse, which rejects NaN and Infinity
+          import json, re
+          payload = re.search(r'<script id="payload" type="application/json">(.*?)</script>', html, re.S).group(1)
+          def reject(name):
+              raise ValueError(f"payload contains {name}, which browsers cannot parse")
+          json.loads(payload, parse_constant=reject)
+          print("reviewer contains the expected payload, as valid JSON")
           PY
 
       - name: Every config resolves

@@ -844,6 +844,32 @@ def _custom_metric_key(name: str) -> str:
     return key
 
 
+def _json_safe(value: Any) -> Any:
+    """Replace NaN and infinities with None, recursively, so the payload is valid JSON.
+
+    Browsers' JSON.parse rejects the bare NaN that json.dumps writes by default, and a
+    single one leaves the whole reviewer page without data. Missing values (for example
+    the footprint of masks from other software) are represented as null instead.
+    """
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (float, np.floating)):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    return value
+
+
+def _payload_json(payload: dict[str, Any]) -> str:
+    return json.dumps(_json_safe(payload), separators=(",", ":"), allow_nan=False)
+
+
 def _jsonable_metric_value(value: Any) -> float | None:
     try:
         numeric = float(value)
@@ -2153,9 +2179,8 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
         '</div>'
         '</div>'
         '<div id="oasisDiagnosticsHelp" class="info-box" hidden>'
-        '<p><strong>Average transient:</strong> dF/F windows around inferred spikes are baseline-subtracted and averaged for the selected ROI.</p>'
-        '<p><strong>Exponential model:</strong> a simple decay curve is drawn from the average transient peak using the empirical decay tau, the time the average transient takes to fall to 1/e of its peak amplitude.</p>'
-        '<p><strong>Amplitude threshold:</strong> only inferred spike amplitudes above the selected threshold contribute to the average transient.</p>'
+        '<p>The blue line averages the selected ROI&apos;s baseline-subtracted dF/F around every inferred spike above the amplitude threshold. The red curve is an exponential decay from its peak with the empirical decay tau, the time the average takes to fall to 1/e of its peak.</p>'
+        '<p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>'
         '</div>'
         '<div class="oasis-diagnostics-body">'
         '<div class="note" id="oasisDiagnosticsSummary">Inferred spikes not loaded for this session.</div>'
@@ -2406,21 +2431,19 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <button class="info-button" type="button" data-info-target="metricDistributionInfo" aria-expanded="false">Distribution Plot Info</button>
       </div>
       <div id="filterSetHelp" class="info-box" hidden>
-        <p>A <strong>filter set</strong> is a named group of threshold values for the metrics below. Choosing one fills in its thresholds, and any field can then be changed. The built-in filter sets are <code>all_rois</code> (no thresholds), <code>soma</code>, <code>dendrite</code> and <code>dendrite_relaxed</code>; filter sets you save or import are listed with "(saved)".</p>
-        <p><strong>Filters are conjunctive:</strong> an ROI passes only if it meets every threshold that is set, so all conditions are combined with AND. A blank field is not used.</p>
-        <p>Filter sets can also be loaded when the reviewer is generated: export one with <strong>Export current filter/sorting settings JSON</strong> under View and Export, then pass the file with <code>--filter-settings</code> or the <code>filter_settings</code> field of a YAML config. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/export/#saving-and-reusing-filter-and-sorting-settings" target="_blank" rel="noopener noreferrer">Saving and reusing filter and sorting settings</a></p>
+        <p>A filter set is a named group of thresholds for the metrics below; choosing one fills them in, and any field can then be changed. An ROI passes only if it meets every threshold that is set, and a blank field is not used.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>The plot beside each metric's threshold fields is a histogram of that metric across all ROIs in this session, over its 1st to 99th percentile range. Plots are shown by default; click <strong>Distribution</strong> above a plot to hide it.</p>
-        <p>Vertical lines mark the thresholds, green for the minimum and red for the maximum, and they move as you type. If no threshold values are entered, the lines reflect the thresholds in the loaded filter set. If no filter set is loaded, or the loaded one has no value for a metric, starting values are used instead: the mean for skew, aspect ratio, compactness, both SNRs, inferred spike SNR and the ROI model probability minimum; the 25th and 75th percentiles for ROI area, inferred spike rise and decay tau and uploaded ROI metrics; and the 75th percentile for connectivity. The value in parentheses beside a field is the one its line uses.</p>
+        <p>Each plot is a histogram of that metric across all ROIs in the session, with green and red lines at the minimum and maximum thresholds. The value in parentheses beside a field is where its line is drawn, taken from your entry, the loaded filter set, or a starting value.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Cell Identity Labels</span>
         <button class="info-button" type="button" data-info-target="cellTypeMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="cellTypeMetricSources" class="info-box" hidden>
-        <p><strong>Cell identity labels:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon). Check one or more identities below to keep only ROIs with those labels; if none are checked, this filter is not used.</p>
-        <p>Labels are read from the session's pipeline outputs when present, or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong> as a CSV, TSV or TXT table or a JSON list. Give an integer code column, a name column, or both.</p>
+        <p>Cell identity labels are cell-type or compartment labels, read from the session's outputs or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Check identities to keep only ROIs with those labels; with none checked, this filter is not used.</p>
         <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
         <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
 0,1,inhibitory
@@ -2431,7 +2454,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
   {{"roi_index": 0, "cell_identity_code": 1, "cell_identity_label": "inhibitory"}},
   {{"roi_index": 1, "cell_identity_code": -1, "cell_identity_label": "excitatory"}}
 ]</pre>
-        <p><code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column. The code and name columns are <code>cell_identity_code</code> and <code>cell_identity_label</code>.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#cell-identity-labels" target="_blank" rel="noopener noreferrer">Cell identity labels and the roi_index column</a></p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
         <span class="note">No cell identity labels loaded.</span>
@@ -2442,10 +2465,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <button class="info-button" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
-        <p>ROI model probability is the trained classifier output for <code>p(good ROI)</code>, loaded from <code>roi_model_scores.h5</code> when available.</p>
-        <p>The currently registered trained model is intended for cerebellar dendrite ROIs only; use it as a target-specific suggestion, not a general ROI quality score for other structures.</p>
-        <p>By default, these scores are suggestions for filtering/sorting and do not label ROIs on page load. If the summary was generated with label initialization enabled, probability greater than or equal to the good threshold opens as <strong>Good</strong>, probability less than or equal to the bad threshold opens as <strong>Bad</strong>, and probabilities between those thresholds open as <strong>Unsure</strong>.</p>
-        <p>To label ROIs from score ranges in the open reviewer, use <strong>Assign Labels to Metric Ranges</strong> below.</p>
+        <p>ROI model probability is the classifier's p(good ROI), loaded from <code>roi_model_scores.h5</code>; the current model was trained on cerebellar dendrite ROIs only. The scores do not label ROIs unless the reviewer was generated with label initialization; use <strong>Assign Labels to Metric Ranges</strong> below to label from them.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#roi-model-probability" target="_blank" rel="noopener noreferrer">ROI model probability in full</a></p>
       </div>
       <div class="filter-controls" id="modelScoreFilterControls">
         <label>ROI model probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
@@ -2458,7 +2479,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <button class="info-button" type="button" data-info-target="customMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="customMetricSources" class="info-box" hidden>
-        <p>Uploaded ROI metrics are your own per-ROI values: files given with <code>--custom-roi-metrics</code> when the reviewer is generated, or QC metric files uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. A CSV has a header row, one row per ROI and one column per metric, for example:</p>
+        <p>Uploaded ROI metrics are your own per-ROI values, given with <code>--custom-roi-metrics</code> at generation or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Each column other than <code>roi_index</code> becomes a metric, and its <strong>Section</strong> menu moves it to any section of this menu and the Sort menu.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
         <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
 0,0.82,1530
@@ -2478,8 +2499,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <pre class="info-example">import numpy as np
 # command line only (--custom-roi-metrics): one value per ROI, in original-index order
 np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity)</pre>
-        <p>Every column other than <code>roi_index</code> becomes a metric named after its header; values must be numbers, with blanks or <code>NaN</code> where missing. <code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column.</p>
-        <p><strong>Section:</strong> an uploaded metric stays in this section unless you move it with its <strong>Section</strong> menu, which can place it under any section of this menu and the matching group of the Sort menu. The section can also be set when the reviewer is generated, with <code>--custom-roi-metric-section NAME=SECTION</code> or the <code>custom_roi_metric_sections</code> field of a YAML config. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/cli-mapping/#uploaded-metrics-and-their-sections" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploaded-roi-metrics" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
       </div>
       <div class="filter-controls">
         <span id="customMetricStatus" class="note"></span>
@@ -2490,12 +2510,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="morphologyMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="morphologyMetricSources" class="info-box" hidden>
-        <p><strong>ROI area calculation:</strong> the number of pixels in the ROI's mask, each pixel counted once whatever its weight. For Suite2p ROIs these are the pixels listed in <code>stat.npy</code> (<code>xpix</code>), including any that Suite2p's soma crop leaves out of its shape statistics. For masks from other software they are the pixels carrying the ROI's label in a dense label mask, or its nonzero pixels in a sparse spatial-component matrix.</p>
-        <p><strong>Aspect ratio calculation:</strong> Suite2p's <code>aspect_ratio</code>. A two-dimensional Gaussian is fitted to the ROI's weighted pixels (only the soma-cropped pixels when Suite2p's <code>soma_crop</code> option is on, the default), and the ratio is 2&nbsp;&times;&nbsp;r<sub>major</sub>&nbsp;/&nbsp;(r<sub>major</sub>&nbsp;+&nbsp;r<sub>minor</sub>&nbsp;+&nbsp;0.01) from the radii of the fitted ellipse: about 1 for a round ROI, approaching 2 for a very elongated one.</p>
-        <p><strong>Compactness calculation:</strong> Suite2p's <code>compact</code>: the mean distance of the ROI's (soma-cropped) pixels from their median position, divided by the mean distance for an ideal disk with the same number of pixels, with a minimum of 1. A disk scores 1 and less compact shapes score higher.</p>
-        <p>For Suite2p ROIs both values are read from <code>stat.npy</code>. For masks from other software the generator computes them the same way, with the same soma crop; a binary label mask gives every pixel the same weight, whereas Suite2p ROIs and sparse spatial components carry per-pixel weights, so values for binary masks are close to but not identical with what Suite2p would report. An external <code>stat.npy</code> keeps the values it has.</p>
-        <p><strong>Connectivity calculation:</strong> Counts the number of separate groups of connected pixels in each ROI mask. Fragmented ROIs (with multiple disconnected pixel groups) may indicate poor ROI segmentation.</p>
-        <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a></p>
+        <p>ROI area counts the mask's pixels, connectivity counts its separate groups of connected pixels, and aspect ratio and compactness are Suite2p's shape statistics, about 1 for a round ROI and higher for elongated or irregular ones. For masks from other software the generator computes them the same way, so binary masks give values close to but not identical with Suite2p's.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#morphology-metrics" target="_blank" rel="noopener noreferrer">Morphology calculations</a> &middot; <a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a></p>
       </div>
       <div class="filter-controls">
         <label>Aspect min <span class="threshold-default" id="aspectMinDefault"></span><input id="aspectMin" type="number" step="0.01" placeholder="Not Used"></label>
@@ -2517,9 +2533,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="fluorescenceMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="fluorescenceMetricSources" class="info-box" hidden>
-        <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a>: <code>skew</code> is a Suite2p trace activity field, not an ROI shape-only field.</p>
-        <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L122-L158" target="_blank" rel="noopener noreferrer">SNR: 95/50 percentile calculation code</a>: robust transient amplitude, <code>P95 - P50</code>, divided by residual noise.</p>
-        <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a>: exceptional-event score where larger values indicate stronger large-transient structure.</p>
+        <p>Skew is Suite2p's trace skewness, SNR 95/50 is the 95th minus the 50th percentile of dF/F divided by residual noise, and the large-transient score is a CaImAn-style exceptional-event score. Larger values of all three indicate clearer transients.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#fluorescence-trace-metrics" target="_blank" rel="noopener noreferrer">Trace metrics and their source code</a></p>
       </div>
       <div class="filter-controls">
         <label>Skew min <span class="threshold-default" id="skewMinDefault"></span><input id="skewMin" type="number" step="0.01" placeholder="Not Used"></label>
@@ -2538,9 +2553,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="inferredSpikeMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="inferredSpikeMetricSources" class="info-box" hidden>
-        <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L470-L556" target="_blank" rel="noopener noreferrer">Inferred spike metric calculation code</a>: metrics are calculated from dF/F windows around thresholded inferred spike amplitudes.</p>
-        <p>The current pipeline can generate inferred spike amplitudes with Suite2p/OASIS, but these reviewer metrics only require an ROI-by-frame inferred-spike amplitude array in the expected format.</p>
-        <p>For each ROI, inferred-spike metrics are computed from dF/F windows around inferred-spike amplitudes above the configured summary-generation threshold. Changing the viewer threshold updates the selected ROI display diagnostics.</p>
+        <p>These metrics are computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated, from any ROI-by-frame inferred spike amplitude array. Changing the amplitude threshold in the viewer updates only the selected ROI's display.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-metrics" target="_blank" rel="noopener noreferrer">Inferred spike metrics in full</a></p>
       </div>
       <div class="filter-controls">
         <label>Inferred spike SNR min <span class="threshold-default" id="oasisEventSnrDefault"></span><input id="oasisEventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
@@ -2559,9 +2573,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
       </div>
       <div id="rangeLabelHelp" class="info-box" hidden>
-        <p>Labels every ROI whose value of one metric falls in a range you set: for example good for a model score probability of 0.85 or more, bad for 0.15 or less and unsure in between (<strong>Use model score thresholds</strong> fills in exactly these, from the thresholds stored with the scores).</p>
-        <p>Each range needs a minimum, a maximum or both. A blank side is open, so a range with only a minimum covers every value at or above it. Both bounds are inclusive. Ranges are checked from the top and an ROI takes the first one it falls in; ROIs outside every range, or with no value for the metric, are left unchanged.</p>
-        <p><strong>Good/bad/unsure labels</strong> sets the review labels directly, as the G/B/U keys do. <strong>New variable</strong> instead adds an uploaded ROI metric with the name you give, whose value is the number of the matching range (1 for the first, 2 for the second, and so on; blank outside every range), and keeps each range's name for the exported spreadsheet. It can then be filtered, sorted and exported like any other metric. Neither option depends on the threshold filters above or needs Apply Filters.</p>
+        <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds; ROIs outside every range are left unchanged. <strong>Good/bad/unsure labels</strong> sets review labels directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#assigning-labels-to-metric-ranges" target="_blank" rel="noopener noreferrer">Range labels in full</a></p>
       </div>
       <div class="range-label-controls">
         <label>Metric <select id="rangeLabelMetric"></select></label>
@@ -2582,9 +2595,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         <button class="info-button" type="button" data-info-target="saveFiltersHelp" aria-expanded="false">Read more</button>
       </div>
       <div id="saveFiltersHelp" class="info-box" hidden>
-        <p><strong>Save new filter set:</strong> saves the current thresholds under the name you enter, inside the open reviewer, so it appears in the Filter set name list until the page is closed.</p>
-        <p><strong>Save filter set into HTML:</strong> saves it the same way, then downloads a copy of this HTML with it, the current labels and the current sort order embedded, so reopening that copy keeps them.</p>
-        <p><strong>Import filter set JSON:</strong> loads a file exported with <strong>Export current filter/sorting settings JSON</strong>, including its sort order, or one written by hand. Only <code>filter</code> is required; leave out any threshold you do not want to use, and use <code>null</code> for an unused minimum or maximum. <code>cellTypeFilter</code> lists the cell identity codes to keep, custom metrics are keyed by their column name in lower case, with spaces and punctuation replaced by underscores, and sort metrics for uploaded metrics are written <code>custom:</code> plus that name. The same file can be given at generation with <code>--filter-settings</code>.</p>
+        <p><strong>Save new filter set</strong> keeps the current thresholds under a name until the page closes, and <strong>Save filter set into HTML</strong> also downloads a copy of the reviewer with it, the labels and the sort order embedded. <strong>Import filter set JSON</strong> loads an exported or hand-written file like the one below, which can also be given at generation with <code>--filter-settings</code>.</p>
         <p class="info-example-label">Filter set JSON (strict_soma.json)</p>
         <pre class="info-example">{{
   "name": "strict soma",
@@ -2597,6 +2608,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
   }},
   "sort": {{"metrics": ["custom:local_contrast"], "direction": "desc"}}
 }}</pre>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#saving-and-importing-filter-sets" target="_blank" rel="noopener noreferrer">Rules for filter set files</a></p>
       </div>
       <div class="filter-controls">
         <label>New filter set name <input id="presetName" type="text" placeholder="my filter set"></label>
@@ -2618,13 +2630,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       <button class="info-button" type="button" data-info-target="sortMetricSources" aria-expanded="false">Read more: metric sources</button>
     </div>
     <div id="sortMetricSources" class="info-box" hidden>
-      <p><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a>: Suite2p-provided fields include ROI shape metrics, detection/template fields, and trace activity fields.</p>
-      <p><strong>Connectivity:</strong> the number of separate groups of connected pixels in each ROI mask. <strong>ROI area:</strong> the number of pixels in the ROI mask. The Read more beside Morphology Metrics in the Filter menu gives the full calculations, for Suite2p ROIs and for masks from other software.</p>
-      <p>Cell identity code comes from loaded anatomical-channel label outputs or an uploaded CSV. Legacy cell-type files use <code>-1</code> excitatory/non-red, <code>0</code> unsure, and <code>1</code> inhibitory/red; other uploaded cell identity labels may use any integer codes, with names supplied by the file.</p>
-      <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py#L122-L158" target="_blank" rel="noopener noreferrer">SNR: 95/50 percentile calculation code</a></p>
-      <p><a class="docs-link" href="https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py" target="_blank" rel="noopener noreferrer">CaImAn-style large-transient score source code</a></p>
-      <p><a class="docs-link" href="https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/processing_summary.py#L470-L556" target="_blank" rel="noopener noreferrer">Inferred spike metric calculation code</a>: metrics are calculated from thresholded inferred-spike amplitude windows.</p>
-      <p>ROI model probability is loaded from <code>roi_model_scores.h5</code> when available; the currently registered model is intended for cerebellar dendrite ROIs only unless another checkpoint is supplied.</p>
+      <p>These are the same metrics as in the Filter menu, with the same definitions and sources. Cell identity code sorts by the integer code, which in legacy cell-type files is <code>-1</code> excitatory/non-red, <code>0</code> unsure and <code>1</code> inhibitory/red.</p>
+      <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#sort-metrics" target="_blank" rel="noopener noreferrer">Sort metrics and their sources</a></p>
     </div>
     <div class="trace-sort">
       <div>
@@ -2676,10 +2683,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       </div>
     </div>
     <div id="saveLabelsHelp" class="info-box" hidden>
-      <p><strong>Save current state into HTML:</strong> downloads a reviewed HTML copy that keeps the current labels, uploaded metrics, saved filter sets and sort order inside the file.</p>
-      <p><strong>Export metric spreadsheet CSV:</strong> saves one row per ROI with code-friendly column names, current labels, ROI metrics, filter failures, and exclusion reasons. Its first column, <code>roi_index</code>, is the ROI's original index.</p>
-      <p><strong>Export labels NPY:</strong> saves <code>roi_manual_labels.npy</code>, a one-dimensional NumPy label array with one row per ROI, in original-index order: <code>NaN</code> not labeled, <code>0</code> bad, <code>1</code> good, and <code>2</code> unsure.</p>
-      <p><strong>Export current filter/sorting settings JSON:</strong> saves the current thresholds, with the filter set name and the current sort order, for reuse or documentation.</p>
+      <p><strong>Save current state into HTML</strong> downloads a copy that keeps the labels, uploaded metrics, saved filter sets and sort order; the CSV and NPY exports have one row or entry per ROI in original-index order. The labels NPY codes <code>NaN</code> as not labeled, <code>0</code> bad, <code>1</code> good and <code>2</code> unsure.</p>
+      <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#saving-labels-and-exports" target="_blank" rel="noopener noreferrer">What each export contains</a></p>
     </div>
     <div class="save-options">
       <div class="save-option">
@@ -2696,7 +2701,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       </div>
       <div class="save-option">
         <button id="saveCurrentFilters">Export current filter/sorting settings JSON</button>
-        <span class="note">Exports the current thresholds, filter set name and sort order. Load them again with <strong>Import filter set JSON</strong> in the Filter menu, or when generating a reviewer with <code>--filter-settings</code> or a YAML config's <code>filter_settings</code> field. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/export/#saving-and-reusing-filter-and-sorting-settings" target="_blank" rel="noopener noreferrer">How to load filter/sorting settings</a></span>
+        <span class="note">Exports the current thresholds, filter set name and sort order. Load them again with <strong>Import filter set JSON</strong> in the Filter menu, or when generating a reviewer with <code>--filter-settings</code> or a YAML config's <code>filter_settings</code> field. <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#saving-and-importing-filter-sets" target="_blank" rel="noopener noreferrer">How to load filter/sorting settings</a></span>
       </div>
       <a class="docs-link" href="https://najafi-laboratory.github.io/2p_imaging/roi-reviewer-exports/#export-format-and-downstream-use" target="_blank" rel="noopener noreferrer">Output format details</a>
     </div>
@@ -2742,7 +2747,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       <button id="applyCustomRoiUpload" type="button">Load selected file</button>
       <div id="customRoiUploadStatus" class="note"></div>
       <div class="info-box">
-        <p><strong>QC metric:</strong> your own per-ROI values to filter and sort by: one row per ROI, one column per metric, and a header row whose names become the metric names. Values must be numbers (blank or <code>NaN</code> where missing).</p>
+        <p>QC metric files add your own numeric per-ROI values, and cell identity files add an integer code, a name or both per ROI; both accept CSV, TSV, TXT and JSON. <code>roi_index</code> is the ROI's 0-based original index, and without it row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
         <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
 0,0.82,1530
@@ -2753,13 +2758,12 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
   "local_contrast": [0.82, 0.41, 0.67],
   "tdtomato_intensity": [1530, 212, 880]
 }}</pre>
-        <p><strong>Cell identity label:</strong> cell-type labels (e.g., excitatory/inhibitory) or compartment labels (e.g., soma/axon): one row per ROI with an integer <code>cell_identity_code</code>, a <code>cell_identity_label</code> name, or both. Names can be edited below after loading.</p>
         <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
         <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
 0,1,inhibitory
 1,-1,excitatory
 2,1,inhibitory</pre>
-        <p><code>roi_index</code> is the ROI's 0-based original index, the number shown as the selected ROI's index. It is optional: without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI. No other name is accepted for this column. The viewer reports an error if the number of rows does not match the number of ROIs. Accepted files: CSV, TSV, TXT and JSON; the Filter menu's Read more boxes show the JSON forms.</p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploading-files" target="_blank" rel="noopener noreferrer">Upload formats in full</a></p>
       </div>
     </div>
     <div class="dialog-section" id="categoryLabelEditorSection" hidden>
@@ -2780,17 +2784,14 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             {red_panel}
           </div>
           <div class="fov-side">
-            <div class="panel gbu-summary">
+            <div class="panel gbu-summary minimized">
               <div class="oasis-diagnostics-header">
                 <div class="title">Summary of good/bad/unsure ROIs</div>
                 <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" title="Hide this panel; show it again from the dF/F panel">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
               </div>
               <div id="gbuSummaryHelp" class="info-box" hidden>
-                <p>These plots group every ROI in the session by its current label and update as you label. ROIs that a metric filter labeled Bad are counted as Bad.</p>
-                <p><strong>Fraction of ROIs by label:</strong> the share of all ROIs in the session with each label (Good, Bad, Unsure and Not labeled), with the count above each bar.</p>
-                <p><strong>Average calcium transient by label:</strong> each ROI's average dF/F transient is computed as in the selected-ROI fit panel: inferred spikes above that ROI's default amplitude threshold, counted at least 0.25 s apart, each with a window from 0.5 s before to 2 s after the spike and the median of its own pre-spike part subtracted. The line is the mean of those per-ROI averages for each label and the band is the standard error of the mean across ROIs, so each ROI counts once however many spikes it has. Event windows whose baseline-subtracted dF/F exceeds 20 in magnitude are left out of the average, as in the multi-session QC summary: values that large come from near-zero baselines rather than calcium signals, and a few of them would otherwise set the scale for the whole label. Those events still count toward the firing rate. ROIs with no spike above their threshold, or with every window left out, have no transient; the note above the plots gives the counts.</p>
-                <p><strong>Firing rate by label:</strong> a kernel density estimate (KDE) of the per-ROI firing rates for each label, where an ROI's firing rate is its number of inferred spikes above threshold (counted as above) divided by the analyzed recording time, in events per second. The curves use a Gaussian kernel with Silverman's bandwidth, reflected at zero because rates cannot be negative, and each has area 1, so labels with different numbers of ROIs compare by shape rather than height. The dashed line marks each label's median, and the x-axis runs to about the 99.5th percentile of all labeled ROIs. A label whose ROIs all share one rate is drawn as a solid line at that rate.</p>
-                <p>The two lower panels need dF/F and inferred spikes. They are computed once when both are loaded and then only regrouped as labels change; changing the amplitude threshold for the selected ROI does not change them.</p>
+                <p>These plots group every ROI by its current label and regroup as you label, with ROIs that a filter labeled Bad counted as Bad. Transients are each ROI's spike-triggered average dF/F (mean &plusmn; s.e.m. across ROIs, windows beyond |dF/F| 20 left out), and firing rates are inferred spikes above threshold per second, drawn as a density per label.</p>
+                <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#summary-of-good-bad-and-unsure-rois" target="_blank" rel="noopener noreferrer">How the summary is computed</a></p>
               </div>
               <div id="gbuSummaryBody">
               <div class="note" id="gbuSummaryNote"></div>
@@ -2818,14 +2819,13 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             </div>
             <button id="resetOasisThreshold" type="button">Reset to ROI default</button>
             <button id="toggleOasisDiagnostics" type="button">Show inferred spike fit metrics</button>
-            <button id="toggleGbuSummary" type="button">Hide summary of good/bad/unsure ROIs</button>
+            <button id="toggleGbuSummary" type="button">Show summary of good/bad/unsure ROIs</button>
             <button class="info-button" type="button" data-info-target="oasisThresholdInfo" aria-expanded="false">Read more</button>
           </div>
         </div>
         <div id="oasisThresholdInfo" class="info-box" hidden>
-          <p>Inferred spikes are loaded as an ROI-by-frame amplitude array. <span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span> The viewer only requires that array shape and meaning, whatever produced it.</p>
-          <p>The underlying values are inferred spike amplitudes, not spike probabilities. Larger values mean the inference method assigned a stronger spike-like transient at that frame.</p>
-          <p>The amplitude threshold is a viewer-side cutoff: frames with inferred spike amplitude above the selected threshold are drawn as red dots on the dF/F trace and are used for average-transient/tau summaries.</p>
+          <p><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span> Values are inferred spike amplitudes, not probabilities, and frames above the amplitude threshold are drawn as red dots and used for the average transient and taus.</p>
+          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-amplitude-threshold" target="_blank" rel="noopener noreferrer">Inferred spikes and the threshold in full</a></p>
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
           <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
@@ -2837,13 +2837,13 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
           <button class="info-button" type="button" data-info-target="traceFileHelp" aria-expanded="false">Read more</button>
         </div>
         <div id="traceFileHelp" class="info-box" hidden>
-          <p>For larger sessions the dF/F and inferred-spike arrays are stored beside this HTML rather than inside it. Opened through a web address they load automatically; opened from disk, select them with these buttons.</p>
-          <p>Each file is a NumPy <code>.npy</code> array with one row per ROI, in original-index order, and one column per frame; both must have the same shape. Rows must be C-ordered (each row one contiguous time series) and little-endian float32, or float64, which is converted on load. Name them <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code>, with this reviewer's session name, to have them load automatically.</p>
+          <p>Larger sessions keep dF/F and inferred spikes beside this HTML; they load automatically through a web address, or from disk with these buttons. Each is a float32 <code>.npy</code> array of shape (ROIs, frames) in original-index order, named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> to load automatically.</p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
 # one row per ROI in original-index order, one column per frame
 np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))            # (n_rois, n_frames)
 np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape</pre>
+          <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#loading-dff-and-inferred-spike-files" target="_blank" rel="noopener noreferrer">File requirements in full</a></p>
         </div>
         <div class="note" id="traceLoadNote"></div>
         <canvas id="traceCanvas"></canvas>
@@ -2889,9 +2889,8 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
             <label>Selected ROI (<span class="roi-index-label">Suite2p Original Index</span>) <input id="roiInput" type="number" min="0" value="0"> <span id="selectedSortPosition" class="note"></span></label>
             <button class="info-button" type="button" data-info-target="roiIndexHelp" aria-expanded="false">Read more</button>
             <div id="roiIndexHelp" class="info-box" hidden>
-              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed identifier. It is 0-indexed, like every input and output file the Python generator reads and writes: ROI <em>k</em> is row <em>k</em> of <code>stat.npy</code>, <code>F.npy</code>, <code>Fneu.npy</code>, <code>iscell.npy</code>, <code>dff.h5</code>, <code>spikes.h5</code> and the <code>_dff.npy</code> / <code>_oasis_spikes.npy</code> sidecars, and row <em>k</em> of the exported <code>roi_manual_labels.npy</code>. The same number appears in the <code>roi_index</code> column of the exported metric CSV, and is what the <code>roi_index</code> column means in uploaded metric and cell identity files. With N ROIs it runs from 0 to N&nbsp;&minus;&nbsp;1, so the last of 225 ROIs is 224.</p>
-              <p>For masks from other segmentation software, the index is the ROI's row after the mask labels are sorted in ascending order, not the label value stored in the mask.</p>
-              <p><strong>Sort position</strong> counts from 1 within the ROIs currently shown, in the current sort order. It changes when you sort, filter or hide labels; the original index never does. Type an original index in the box to jump to that ROI.</p>
+              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed 0-based identifier: ROI <em>k</em> is row <em>k</em> of every input and exported file and <em>k</em> in every <code>roi_index</code> column. Sort position counts from 1 within the ROIs currently shown and changes when you sort, filter or hide labels; type an original index in the box to jump to that ROI.</p>
+              <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#original-index-and-sort-position" target="_blank" rel="noopener noreferrer">Original index and sort position in full</a></p>
             </div>
             <details class="roi-details">
               <summary id="roiDetailsSummary">Selected ROI Details</summary>
@@ -2953,7 +2952,7 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
     </div>
   </div>
 </div>
-<script id="payload" type="application/json">{json.dumps(payload, separators=(",", ":"))}</script>
+<script id="payload" type="application/json">{_payload_json(payload)}</script>
 <script>
 "use strict";
 const data = JSON.parse(document.getElementById("payload").textContent);
@@ -6357,7 +6356,19 @@ def create_preprocessing_summary(
         else None
     )
 
-    frame_rate = float(ops.get("fs", 30.0))
+    # Frame rate: Suite2p's ops["fs"]; for external masks, "frame_rate" (Hz) in
+    # external_roi_metadata.json; otherwise 30 Hz.
+    external_frame_rate = (
+        _load_external_metadata(resolved_layout.input_dir).get("frame_rate")
+        if resolved_layout.name == "external_rois"
+        else None
+    )
+    if "fs" in ops:
+        frame_rate = float(ops["fs"])
+    elif external_frame_rate is not None:
+        frame_rate = float(external_frame_rate)
+    else:
+        frame_rate = 30.0
     dff_label = resolved_layout.dff_label
     n_rois = min(int(fluo_probe.shape[0]), len(suite2p_stat))
     n_frames = int(fluo_probe.shape[1])
