@@ -143,12 +143,21 @@ The plot beside each metric's threshold fields is a histogram of that metric
 across all ROIs in the session, over its 1st to 99th percentile range. Plots are
 shown by default; click **Distribution** above a plot to hide it.
 
-Vertical lines mark the thresholds, green for the minimum and red for the
-maximum, and they move as you type. Where they are drawn depends on what is set:
+Vertical lines show where each field's threshold is, and they move as you type:
 
-1. Threshold values you enter.
-2. Otherwise, the thresholds in the loaded filter set.
-3. Otherwise, a starting value:
+- A threshold you have entered is a **solid** line, green for a minimum and red
+  for a maximum, labeled `min` or `max` with its value.
+- A field that is not used shows its starting value as a **dashed gray** line,
+  labeled with where that value comes from (`filter set`, `mean`, `25th pct` or
+  `75th pct`). It is only a guide and filters nothing until a value is entered.
+  When a minimum and a maximum start from the same value, one line is drawn.
+- A value outside the plotted range is pinned to the nearer edge, with an arrow
+  pointing toward it.
+
+The starting value is, in order of preference:
+
+1. The threshold in the loaded filter set.
+2. Otherwise, a statistic of this session:
     - the mean for skew, aspect ratio, compactness, both SNRs, inferred spike
       SNR and the ROI model probability minimum;
     - the 25th and 75th percentiles for ROI area, inferred spike rise and

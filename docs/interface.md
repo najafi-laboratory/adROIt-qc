@@ -59,7 +59,7 @@ in this file. These describe the current population so a candidate cut can be se
 context. They are not recommendations.
 
 <div class="screenshot" markdown>
-![A per-metric distribution histogram with the reference value drawn on it.](img/metric-distributions.png)
+![A per-metric distribution histogram with its starting value drawn as a dashed line.](img/metric-distributions.png)
 </div>
 
 `Show distribution` draws the metric's distribution across the session with markers that

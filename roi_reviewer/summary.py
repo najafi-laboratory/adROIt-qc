@@ -2446,7 +2446,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Each plot is a histogram of that metric across all ROIs in the session, with green and red lines at the minimum and maximum thresholds. The value in parentheses beside a field is where its line is drawn, taken from your entry, the loaded filter set, or a starting value.</p>
+        <p>Each plot is a histogram of that metric across all ROIs in the session, with solid green and red lines at the minimum and maximum thresholds you have entered. A field that is not used shows its starting value instead, the value in parentheses beside it (from the loaded filter set, or the mean or a percentile of the session), as a dashed gray line labeled with that statistic.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
@@ -3948,7 +3948,8 @@ function updateSuite2pPresetThresholds(filter) {{
     compactMax: mean(finiteMetricValues("compact")),
   }};
   for (const id of ["skewMin","skewMax","aspectMin","aspectMax","compactMin","compactMax"]) {{
-    setReferenceStatistic(id, filter && filter[id] !== null && filter[id] !== undefined ? filter[id] : fallback[id]);
+    const fromFilter = filter && filter[id] !== null && filter[id] !== undefined;
+    setReferenceStatistic(id, fromFilter ? filter[id] : fallback[id], fromFilter ? "filter set" : "mean");
   }}
 }}
 function drawMetricHistogram(canvas) {{
@@ -3982,37 +3983,61 @@ function drawMetricHistogram(canvas) {{
     const bh = count / maxCount * plotH;
     ctx.fillRect(x, plotBottom - bh, bw, bh);
   }});
-  function drawLine(value, color, label) {{
-    if (!Number.isFinite(value)) return;
-    const x = pad + (value - lo) / (hi - lo) * plotW;
-    if (x < pad || x > pad + plotW) return;
-    ctx.save();
-    ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, 1.5 * r);
-    ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom + 2); ctx.stroke();
-    ctx.fillStyle = color; ctx.font = `${{10 * r}}px Arial`; ctx.textAlign = "center";
-    ctx.fillText(`${{label}} ${{fmt(value)}}`, x, plotTop - 3 * r);
-    ctx.restore();
-  }}
-  function thresholdInfo(inputId, label) {{
-    if (!inputId) return;
+  // Thresholds the user has entered are solid green (min) and red (max) lines labeled
+  // "min"/"max". A field that is not used shows its starting value instead (filter set
+  // value, mean or percentile, as in the parentheses beside the field) as a dashed gray
+  // line labeled with that statistic, so it is never mistaken for an active threshold.
+  // Values beyond the plotted range are pinned to the edge with an arrow.
+  function lineSpec(inputId, bound) {{
+    if (!inputId) return null;
     const activeValue = filterValue(inputId);
+    if (Number.isFinite(activeValue)) {{
+      return {{value: activeValue, active: true, bound, color: bound === "min" ? "#16a34a" : "#dc2626", text: `${{bound}} ${{fmt(activeValue)}}`}};
+    }}
     const referenceValue = referenceStatistics[inputId];
-    const value = Number.isFinite(activeValue) ? activeValue : referenceValue;
-    return {{value, label, active: Number.isFinite(activeValue)}};
+    if (!Number.isFinite(referenceValue)) return null;
+    const name = referenceStatisticLabels[inputId] || "reference";
+    return {{value: referenceValue, active: false, bound, color: "#667085", text: `${{name}} ${{fmt(referenceValue)}}`}};
   }}
-  const minThreshold = thresholdInfo(canvas.dataset.min, "min");
-  const maxThreshold = thresholdInfo(canvas.dataset.max, "max");
-  if (
-    minThreshold && maxThreshold &&
-    !minThreshold.active && !maxThreshold.active &&
-    Number.isFinite(minThreshold.value) && Number.isFinite(maxThreshold.value) &&
-    Math.abs(minThreshold.value - maxThreshold.value) <= Math.max(1e-9, Math.abs(minThreshold.value) * 1e-9)
-  ) {{
-    drawLine(minThreshold.value, "#2563eb", referenceStatisticLabels[canvas.dataset.min] || "mean");
-  }} else {{
-    if (minThreshold) drawLine(minThreshold.value, "#16a34a", minThreshold.label);
-    if (maxThreshold) drawLine(maxThreshold.value, "#dc2626", maxThreshold.label);
+  let specs = [lineSpec(canvas.dataset.min, "min"), lineSpec(canvas.dataset.max, "max")].filter(Boolean);
+  if (specs.length === 2 && !specs[0].active && !specs[1].active &&
+      Math.abs(specs[0].value - specs[1].value) <= Math.max(1e-9, Math.abs(specs[0].value) * 1e-9)) {{
+    specs = [specs[0]];  // the same starting value for both bounds: draw it once
   }}
+  ctx.save();
+  ctx.font = `${{10 * r}}px Arial`;
+  const labelY = plotTop - 3 * r, edge = 2 * r;
+  const placed = specs.map(spec => {{
+    const raw = pad + (spec.value - lo) / (hi - lo) * plotW;
+    const below = raw < pad, above = raw > pad + plotW;
+    const x = Math.min(pad + plotW, Math.max(pad, raw));
+    const text = below ? `\u2190 ${{spec.text}}` : above ? `${{spec.text}} \u2192` : spec.text;
+    const width = ctx.measureText(text).width;
+    let left = x - width / 2;
+    if (below) left = x; else if (above) left = x - width;
+    left = Math.min(w - edge - width, Math.max(edge, left));
+    return {{...spec, x, text, width, left}};
+  }});
+  if (placed.length === 2) {{
+    // keep the two labels apart: the lower value's label ends at its line, the higher one starts at its line
+    const [a, b] = placed[0].x <= placed[1].x ? placed : [placed[1], placed[0]];
+    if (a.left + a.width + 4 * r > b.left) {{
+      a.left = Math.max(edge, Math.min(a.x, w - edge) - a.width - 2 * r);
+      b.left = Math.min(w - edge - b.width, Math.max(edge, b.x + 2 * r));
+      if (a.left + a.width + 4 * r > b.left) b.y = labelY + 11 * r;  // still crowded: drop the second label a row
+    }}
+  }}
+  for (const p of placed) {{
+    ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(p.active ? 2 : 1.5, (p.active ? 1.5 : 1.2) * r);
+    ctx.setLineDash(p.active ? [] : [4 * r, 3 * r]);
+    ctx.beginPath(); ctx.moveTo(p.x, plotTop); ctx.lineTo(p.x, plotBottom + 2); ctx.stroke();
+    ctx.setLineDash([]);
+    const y = p.y || labelY;
+    if (p.y) {{ ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(p.left - 1, y - 9 * r, p.width + 2, 11 * r); }}
+    ctx.fillStyle = p.color; ctx.textAlign = "left";
+    ctx.fillText(p.text, p.left, y);
+  }}
+  ctx.restore();
   const binSize = (hi - lo) / bins;
   const yText = h - 7 * (window.devicePixelRatio || 1);
   ctx.fillStyle = "#475467"; ctx.font = `${{10 * (window.devicePixelRatio || 1)}}px Arial`;
