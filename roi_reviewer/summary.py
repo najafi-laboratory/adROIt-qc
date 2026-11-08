@@ -2303,6 +2303,12 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .metric-histogram-panel {{ min-width: 180px; }}
 .metric-histogram-panel summary {{ cursor: pointer; color: #175cd3; font-size: 14px; font-weight: 600; }}
 .metric-histogram {{ height: 92px; min-width: 180px; margin-top: 4px; }}
+.histogram-probe-readout {{ font-size: 12px; color: #5b21b6; margin-top: 2px; line-height: 1.3; }}
+.histogram-stats {{ margin-top: 2px; font-size: 12px; color: #344054; }}
+.histogram-stats summary {{ cursor: pointer; color: #175cd3; font-weight: 600; }}
+.histogram-stats-table {{ border-collapse: collapse; margin-top: 2px; }}
+.histogram-stats-table th {{ text-align: left; font-weight: 400; color: #667085; padding: 1px 12px 1px 0; }}
+.histogram-stats-table td {{ text-align: right; font-variant-numeric: tabular-nums; padding: 1px 0; }}
 .filter-subsection-title {{ margin-top: 10px; font-size: 15px; font-weight: 700; color: #344054; }}
 .custom-metric-header {{ grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 14px; color: #344054; }}
 .custom-metric-header label {{ display: flex; gap: 6px; align-items: center; }}
@@ -2446,7 +2452,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Each plot is a histogram of that metric across all ROIs in the session, with solid green and red lines at the minimum and maximum thresholds you have entered. A field that is not used shows its starting value instead, the value in parentheses beside it (from the loaded filter set, or the mean or a percentile of the session), as a dashed gray line labeled with that statistic.</p>
+        <p>Each plot is a histogram of that metric across all ROIs, with solid green and red lines at thresholds you have entered and dashed gray lines at the starting value (in parentheses) of fields that are not used. Drag the purple line to see a value's percentile and how many ROIs fall below and at or above it, and open <strong>Summary statistics</strong> for the minimum, quartiles, median and maximum.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
@@ -3952,8 +3958,78 @@ function updateSuite2pPresetThresholds(filter) {{
     setReferenceStatistic(id, fromFilter ? filter[id] : fallback[id], fromFilter ? "filter set" : "mean");
   }}
 }}
+// Draggable value line on each metric distribution: shows where a value sits in the
+// session's distribution (percentile, ROIs below and at or above). Double-click resets
+// it to the median. An expandable box under the plot lists summary statistics.
+function histogramExtras(canvas) {{
+  const holder = canvas.closest(".metric-histogram-panel") || canvas.parentElement;
+  let readout = holder.querySelector(".histogram-probe-readout");
+  if (!readout) {{
+    readout = document.createElement("div");
+    readout.className = "histogram-probe-readout";
+    canvas.insertAdjacentElement("afterend", readout);
+    const stats = document.createElement("details");
+    stats.className = "histogram-stats";
+    stats.innerHTML = '<summary>Summary statistics</summary><table class="histogram-stats-table"></table>';
+    readout.insertAdjacentElement("afterend", stats);
+  }}
+  return {{readout, table: holder.querySelector(".histogram-stats-table")}};
+}}
+function countBelow(sorted, value) {{
+  let lo = 0, hi = sorted.length;
+  while (lo < hi) {{ const mid = (lo + hi) >> 1; if (sorted[mid] < value) lo = mid + 1; else hi = mid; }}
+  return lo;
+}}
+function bindHistogramProbe(canvas) {{
+  if (canvas._probeBound) return;
+  canvas._probeBound = true;
+  canvas.style.cursor = "ew-resize";
+  canvas.style.touchAction = "none";
+  canvas.title = "Drag to read off a value's percentile; double-click to reset to the median";
+  const move = event => {{
+    const s = canvas._probeScale;
+    if (!s) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
+    const t = Math.min(1, Math.max(0, (x - s.pad) / s.plotW));
+    canvas._probeValue = s.lo + t * (s.hi - s.lo);
+    drawMetricHistogram(canvas);
+  }};
+  canvas.addEventListener("pointerdown", event => {{ canvas.setPointerCapture(event.pointerId); canvas._dragging = true; move(event); }});
+  canvas.addEventListener("pointermove", event => {{ if (canvas._dragging) move(event); }});
+  const end = () => {{ canvas._dragging = false; }};
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas.addEventListener("dblclick", () => {{ canvas._probeValue = undefined; drawMetricHistogram(canvas); }});
+}}
+function drawHistogramProbe(canvas, ctx, values, scale) {{
+  const {{readout, table}} = histogramExtras(canvas);
+  if (!values.length) {{ readout.textContent = ""; table.innerHTML = ""; canvas._probeScale = null; return; }}
+  const sorted = values.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  if (canvas._probeMetric !== canvas.dataset.metric || !Number.isFinite(canvas._probeValue)) {{
+    canvas._probeMetric = canvas.dataset.metric;
+    canvas._probeValue = percentile(sorted, 0.5);
+  }}
+  canvas._probeScale = scale;
+  const value = canvas._probeValue;
+  const {{lo, hi, pad, plotW, plotTop, plotBottom, r}} = scale;
+  const x = pad + Math.min(1, Math.max(0, (value - lo) / (hi - lo))) * plotW;
+  ctx.save();
+  ctx.strokeStyle = "#7c3aed"; ctx.fillStyle = "#7c3aed"; ctx.lineWidth = Math.max(1.5, 1.2 * r);
+  ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, plotBottom, 3.5 * r, 0, 2 * Math.PI); ctx.fill();
+  ctx.restore();
+  const below = countBelow(sorted, value), above = n - below;
+  const pct = 100 * below / n;
+  readout.textContent = `Line at ${{fmt(value)}}: percentile ${{pct.toFixed(1)}}, ${{below.toLocaleString()}} ROIs below and ${{above.toLocaleString()}} at or above (of ${{n.toLocaleString()}} with a value)`;
+  const rows = [["ROIs with a value", n.toLocaleString()], ["Minimum", fmt(sorted[0])], ["25th percentile", fmt(percentile(sorted, 0.25))],
+                ["Median", fmt(percentile(sorted, 0.5))], ["75th percentile", fmt(percentile(sorted, 0.75))], ["Maximum", fmt(sorted[n - 1])]];
+  table.innerHTML = rows.map(([k, v]) => `<tr><th scope="row">${{k}}</th><td>${{v}}</td></tr>`).join("");
+}}
 function drawMetricHistogram(canvas) {{
   fit(canvas);
+  bindHistogramProbe(canvas);
   const ctx = canvas.getContext("2d");
   const metric = canvas.dataset.metric;
   const values = finiteMetricValues(metric);
@@ -3961,7 +4037,10 @@ function drawMetricHistogram(canvas) {{
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = "#d0d5dd"; ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  if (!values.length) return;
+  if (!values.length) {{
+    drawHistogramProbe(canvas, ctx, values, null);
+    return;
+  }}
   const r = window.devicePixelRatio || 1;
   ctx.fillStyle = "#344054"; ctx.font = `${{11 * r}}px Arial`; ctx.textAlign = "left";
   ctx.fillText(metricLabel(metric), pad, 12 * r);
@@ -4044,6 +4123,7 @@ function drawMetricHistogram(canvas) {{
   ctx.textAlign = "left"; ctx.fillText(fmt(lo), pad, yText);
   ctx.textAlign = "center"; ctx.fillText(`Bin ${{fmt(binSize)}}`, pad + plotW / 2, yText);
   ctx.textAlign = "right"; ctx.fillText(fmt(hi), pad + plotW, yText);
+  drawHistogramProbe(canvas, ctx, values, {{lo, hi, pad, plotW, plotTop, plotBottom, r}});
 }}
 function drawMetricHistograms() {{
   document.querySelectorAll(".metric-histogram-panel[open] .metric-histogram").forEach(drawMetricHistogram);

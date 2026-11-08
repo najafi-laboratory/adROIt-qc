@@ -154,6 +154,14 @@ Vertical lines show where each field's threshold is, and they move as you type:
 - A value outside the plotted range is pinned to the nearer edge, with an arrow
   pointing toward it.
 
+A purple line can be dragged across each plot. Below the plot it reports the
+line's value, its percentile in the session, and how many ROIs fall below it and
+at or above it, out of those with a value for the metric. It starts at the median
+and double-clicking the plot returns it there. It only reads the distribution and
+does not change any threshold. **Summary statistics**, under the readout, expands
+to list the number of ROIs with a value, the minimum, 25th percentile, median, 75th
+percentile and maximum.
+
 The starting value is, in order of preference:
 
 1. The threshold in the loaded filter set.
