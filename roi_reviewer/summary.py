@@ -2303,6 +2303,15 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .metric-histogram-panel {{ min-width: 180px; }}
 .metric-histogram-panel summary {{ cursor: pointer; color: #175cd3; font-size: 14px; font-weight: 600; }}
 .metric-histogram {{ height: 92px; min-width: 180px; margin-top: 4px; }}
+.filter-controls.metric-blocks {{ grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; gap: 12px; }}
+.metric-block {{ display: flex; flex-direction: column; gap: 4px; min-width: 0; }}
+.metric-block .custom-metric-header {{ grid-column: auto; }}
+.metric-block .metric-histogram-panel {{ min-width: 0; }}
+.metric-bounds {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: end; }}
+.metric-bounds label {{ font-size: 13px; }}
+.histogram-threshold-readout {{ font-size: 12px; color: #344054; margin-top: 2px; line-height: 1.3; }}
+.histogram-threshold-readout .excluded {{ color: #b42318; font-weight: 600; }}
+.histogram-threshold-readout .kept {{ color: #067647; font-weight: 600; }}
 .histogram-probe-readout {{ font-size: 12px; color: #5b21b6; margin-top: 2px; line-height: 1.3; }}
 .histogram-stats {{ margin-top: 2px; font-size: 12px; color: #344054; }}
 .histogram-stats summary {{ cursor: pointer; color: #175cd3; font-weight: 600; }}
@@ -2387,13 +2396,19 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .gbu-summary.minimized {{ display: none; }}
 .fov-side.empty {{ display: none; }}
 .oasis-diagnostics .note {{ margin-bottom: 6px; }}
-#oasisTransientCanvas {{ height: 220px; }}
+#oasisTransientCanvas {{ height: 210px; }}
 .fov-side {{ display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 600px; min-width: 0; }}
 .gbu-summary {{ width: 100%; }}
 .gbu-plot-title {{ font-size: 12px; font-weight: 600; color: #344054; margin: 8px 0 3px; }}
-#gbuFractionCanvas {{ height: 160px; }}
-#gbuTransientCanvas {{ height: 220px; }}
-#gbuRateCanvas {{ height: 190px; }}
+#gbuFractionCanvas {{ height: 150px; }}
+#gbuTransientCanvas {{ height: 210px; }}
+#gbuRateCanvas {{ height: 150px; }}
+.gbu-compact-row {{ display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 10px; align-items: start; }}
+.transient-row {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: start; }}
+.transient-row.empty {{ display: none; }}
+.transient-row .oasis-diagnostics {{ max-width: none; }}
+.gbu-transient-panel.minimized {{ display: none; }}
+.gbu-transient-panel .title {{ margin-bottom: 6px; }}
 .oasis-panel {{ margin-top: 10px; }}
 .oasis-toggle {{ display: flex; gap: 6px; align-items: center; font-weight: 700; }}
 .oasis-toggle input {{ width: auto; }}
@@ -2452,7 +2467,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Each plot is a histogram of that metric across all ROIs, with solid green and red lines at thresholds you have entered and dashed gray lines at the starting value (in parentheses) of fields that are not used. Drag the purple line to see a value's percentile and how many ROIs fall below and at or above it, and open <strong>Summary statistics</strong> for the minimum, quartiles, median and maximum.</p>
+        <p>Each plot is a histogram of that metric across all ROIs, with solid green and red lines at thresholds you have entered and dashed gray lines at the starting value (in parentheses) of fields that are not used. Drag a green, red or gray line to set that threshold, with the counts below the min, between and above the max shown under the plot; drag elsewhere to move the purple line, which reports a value's percentile, and open <strong>Summary statistics</strong> for the quartiles and range.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
@@ -2806,7 +2821,7 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             {red_panel}
           </div>
           <div class="fov-side">
-            <div class="panel gbu-summary minimized">
+            <div class="panel gbu-summary">
               <div class="oasis-diagnostics-header">
                 <div class="title">Summary of good/bad/unsure ROIs</div>
                 <div class="oasis-diagnostics-actions"><button id="gbuSummaryToggle" type="button" title="Hide this panel; show it again from the dF/F panel">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
@@ -2817,22 +2832,27 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
               </div>
               <div id="gbuSummaryBody">
               <div class="note" id="gbuSummaryNote"></div>
-              <div class="gbu-plot-title">Fraction of ROIs by label</div>
-              <canvas id="gbuFractionCanvas"></canvas>
-              <div class="gbu-plot-title">Average calcium transient by label (mean &plusmn; s.e.m. across ROIs)</div>
-              <canvas id="gbuTransientCanvas"></canvas>
-              <div class="gbu-plot-title">Firing rate by label</div>
-              <canvas id="gbuRateCanvas"></canvas>
+              <div class="gbu-compact-row">
+                <div><div class="gbu-plot-title">Fraction of ROIs by label</div><canvas id="gbuFractionCanvas"></canvas></div>
+                <div><div class="gbu-plot-title">Firing rate by label</div><canvas id="gbuRateCanvas"></canvas></div>
+              </div>
               </div>
             </div>
-            {oasis_diagnostics_panel}
           </div>
         </div>
+        <div class="transient-row">
+          <div class="panel gbu-transient-panel">
+            <div class="title">Average calcium transient by label (mean &plusmn; s.e.m. across ROIs)</div>
+            <canvas id="gbuTransientCanvas"></canvas>
+          </div>
+          {oasis_diagnostics_panel}
+        </div>
       </div>
+
       <div class="panel">
         <div class="trace-header-row">
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
-          <button id="toggleGbuSummary" type="button" class="trace-summary-toggle">Show Summary by QC Label</button>
+          <button id="toggleGbuSummary" type="button" class="trace-summary-toggle">Hide Summary by QC Label</button>
           <div class="trace-header-controls" id="traceOasisControls">
             <label class="oasis-toggle"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
             <label>Amplitude threshold</label>
@@ -2842,18 +2862,13 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             </div>
             <button id="resetOasisThreshold" type="button">Reset to ROI default</button>
             <button id="toggleOasisDiagnostics" type="button">Show inferred spike fit metrics</button>
+            <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
           </div>
         </div>
         
-        <div class="trace-loader" id="traceLoader" style="display:none;">
-          <input id="dffFile" type="file" accept=".npy">
-          <input id="oasisFile" type="file" accept=".npy">
-          <button id="loadDffFile">Load dF/F file</button>
-          <button id="loadOasisFile" type="button">Load inferred spikes file</button>
-          <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
-        </div>
+        <div class="trace-loader" id="traceLoader" hidden></div>
         <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically through a web address when named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside this HTML, or from disk with the load buttons.</p>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
@@ -3118,7 +3133,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
 // Sidecars load by fetch() relative to this page, which browsers allow over http(s) but not
 // for a page opened from disk (file://). The notes below say which case applies.
 const openedFromDisk = window.location.protocol === "file:";
-const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Select the .npy file(s) with the buttons above, or open this page through a web server (an http:// or https:// address), where they load automatically.";
+const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Open this page through a web server (an http:// or https:// address, for example python -m http.server run in this folder) to load them automatically.";
 function updateSidecarLoadNote() {{
   const note = document.getElementById("traceLoadNote");
   const parts = [];
@@ -3180,19 +3195,17 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
   dff = b64f32(data.dff);
 }}
 {{
-  // File pickers are always shown: any session can be given a replacement dF/F array
-  // or an inferred-spikes array, whichever storage mode it was generated with.
-  const loader = document.getElementById("traceLoader");
+  // dF/F and inferred spikes come from the session (embedded, or .npy sidecars beside the HTML);
+  // there are no file pickers, so a sidecar session must be opened through a web server.
   const note = document.getElementById("traceLoadNote");
-  loader.style.display = "";
   const usesSidecars = data.dffStorageMode === "file" || data.oasisStorageMode === "file";
   note.textContent = usesSidecars
     ? (openedFromDisk
         ? `This session keeps its large arrays in .npy files beside this HTML. ${{SIDECAR_DISK_ADVICE}}`
         : `This session keeps its large arrays in .npy files beside this HTML. Loading them from this folder.`)
     : data.oasisAvailable
-      ? `Optional: load ROI x frame .npy files to replace the embedded dF/F or inferred spikes.`
-      : `Optional: load an ROI x frame inferred-spikes .npy file to show spike overlays and fit metrics.`;
+      ? ``
+      : `No inferred spikes were found for this session, so spike overlays and fit metrics are not shown.`;
 }}
 // The Suite2p and OASIS links are shown only when the inferred-spike file says it came from them
 // (spikes.h5 attribute `method`, e.g. suite2p.extraction.dcnv.oasis). A replacement array loaded
@@ -3691,6 +3704,7 @@ function renderCustomMetricControls() {{
     : "No uploaded ROI metrics loaded.";
   if (typeof refreshRangeMetricOptions === "function") refreshRangeMetricOptions();
   updateModelDerivedVisibility();
+  arrangeMetricBlocks();
 }}
 function readCustomMetricFiltersFromInputs() {{
   const values = {{}};
@@ -3958,53 +3972,112 @@ function updateSuite2pPresetThresholds(filter) {{
     setReferenceStatistic(id, fromFilter ? filter[id] : fallback[id], fromFilter ? "filter set" : "mean");
   }}
 }}
-// Draggable value line on each metric distribution: shows where a value sits in the
-// session's distribution (percentile, ROIs below and at or above). Double-click resets
-// it to the median. An expandable box under the plot lists summary statistics.
+// Draggable lines on each metric distribution. The min/max threshold lines (solid when entered,
+// dashed gray when the field is not used) can be dragged to set that field's value; dragging
+// anywhere else moves a purple value line that reports where a value sits in the session's
+// distribution (percentile, ROIs below and at or above). Double-click resets the purple line to
+// the median. A readout under the plot counts ROIs below the min, between, and above the max,
+// and an expandable box lists summary statistics.
 function histogramExtras(canvas) {{
   const holder = canvas.closest(".metric-histogram-panel") || canvas.parentElement;
   let readout = holder.querySelector(".histogram-probe-readout");
   if (!readout) {{
+    const thresholds = document.createElement("div");
+    thresholds.className = "histogram-threshold-readout";
+    canvas.insertAdjacentElement("afterend", thresholds);
     readout = document.createElement("div");
     readout.className = "histogram-probe-readout";
-    canvas.insertAdjacentElement("afterend", readout);
+    thresholds.insertAdjacentElement("afterend", readout);
     const stats = document.createElement("details");
     stats.className = "histogram-stats";
     stats.innerHTML = '<summary>Summary statistics</summary><table class="histogram-stats-table"></table>';
     readout.insertAdjacentElement("afterend", stats);
   }}
-  return {{readout, table: holder.querySelector(".histogram-stats-table")}};
+  return {{readout, thresholds: holder.querySelector(".histogram-threshold-readout"), table: holder.querySelector(".histogram-stats-table")}};
 }}
 function countBelow(sorted, value) {{
   let lo = 0, hi = sorted.length;
   while (lo < hi) {{ const mid = (lo + hi) >> 1; if (sorted[mid] < value) lo = mid + 1; else hi = mid; }}
   return lo;
 }}
+function countAtOrBelow(sorted, value) {{
+  let lo = 0, hi = sorted.length;
+  while (lo < hi) {{ const mid = (lo + hi) >> 1; if (sorted[mid] <= value) lo = mid + 1; else hi = mid; }}
+  return lo;
+}}
+function roundToInputStep(input, value) {{
+  const step = parseFloat(input.step);
+  let v = value;
+  if (Number.isFinite(step) && step > 0) {{
+    const decimals = (String(input.step).split(".")[1] || "").length;
+    v = Number((Math.round(v / step) * step).toFixed(decimals));
+  }} else {{
+    v = Number(v.toPrecision(4));
+  }}
+  const min = parseFloat(input.min);
+  if (Number.isFinite(min)) v = Math.max(min, v);
+  return v;
+}}
 function bindHistogramProbe(canvas) {{
   if (canvas._probeBound) return;
   canvas._probeBound = true;
-  canvas.style.cursor = "ew-resize";
   canvas.style.touchAction = "none";
-  canvas.title = "Drag to read off a value's percentile; double-click to reset to the median";
-  const move = event => {{
-    const s = canvas._probeScale;
-    if (!s) return;
+  canvas.style.cursor = "crosshair";
+  canvas.title = "Drag a min/max line to set that threshold; drag elsewhere to read off a value's percentile; double-click to reset the purple line";
+  const canvasX = event => {{
     const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
-    const t = Math.min(1, Math.max(0, (x - s.pad) / s.plotW));
-    canvas._probeValue = s.lo + t * (s.hi - s.lo);
-    drawMetricHistogram(canvas);
+    return (event.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
   }};
-  canvas.addEventListener("pointerdown", event => {{ canvas.setPointerCapture(event.pointerId); canvas._dragging = true; move(event); }});
-  canvas.addEventListener("pointermove", event => {{ if (canvas._dragging) move(event); }});
-  const end = () => {{ canvas._dragging = false; }};
+  const valueAt = x => {{
+    const s = canvas._probeScale;
+    const t = Math.min(1, Math.max(0, (x - s.pad) / s.plotW));
+    return s.lo + t * (s.hi - s.lo);
+  }};
+  const nearestThreshold = x => {{
+    const r = window.devicePixelRatio || 1;
+    let best = null;
+    for (const line of canvas._thresholdLines || []) {{
+      const input = document.getElementById(line.inputId);
+      if (!input || input.disabled) continue;
+      const d = Math.abs(line.x - x);
+      if (d <= 8 * r && (!best || d < best.d)) best = {{d, input}};
+    }}
+    return best ? best.input : null;
+  }};
+  const move = event => {{
+    if (!canvas._probeScale) return;
+    const x = canvasX(event);
+    if (canvas._dragInput) {{
+      canvas._dragInput.value = roundToInputStep(canvas._dragInput, valueAt(x));
+      canvas._dragInput.dispatchEvent(new Event("input", {{bubbles: true}}));
+    }} else {{
+      canvas._probeValue = valueAt(x);
+      drawMetricHistogram(canvas);
+    }}
+  }};
+  canvas.addEventListener("pointerdown", event => {{
+    if (!canvas._probeScale) return;
+    canvas.setPointerCapture(event.pointerId);
+    canvas._dragging = true;
+    canvas._dragInput = nearestThreshold(canvasX(event));
+    move(event);
+  }});
+  canvas.addEventListener("pointermove", event => {{
+    if (canvas._dragging) {{ move(event); return; }}
+    if (canvas._probeScale) canvas.style.cursor = nearestThreshold(canvasX(event)) ? "ew-resize" : "crosshair";
+  }});
+  const end = () => {{
+    if (canvas._dragging && canvas._dragInput) canvas._dragInput.dispatchEvent(new Event("change", {{bubbles: true}}));
+    canvas._dragging = false;
+    canvas._dragInput = null;
+  }};
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("dblclick", () => {{ canvas._probeValue = undefined; drawMetricHistogram(canvas); }});
 }}
 function drawHistogramProbe(canvas, ctx, values, scale) {{
-  const {{readout, table}} = histogramExtras(canvas);
-  if (!values.length) {{ readout.textContent = ""; table.innerHTML = ""; canvas._probeScale = null; return; }}
+  const {{readout, thresholds, table}} = histogramExtras(canvas);
+  if (!values.length) {{ readout.textContent = ""; thresholds.textContent = ""; table.innerHTML = ""; canvas._probeScale = null; return; }}
   const sorted = values.slice().sort((a, b) => a - b);
   const n = sorted.length;
   if (canvas._probeMetric !== canvas.dataset.metric || !Number.isFinite(canvas._probeValue)) {{
@@ -4022,7 +4095,22 @@ function drawHistogramProbe(canvas, ctx, values, scale) {{
   ctx.restore();
   const below = countBelow(sorted, value), above = n - below;
   const pct = 100 * below / n;
-  readout.textContent = `Line at ${{fmt(value)}}: percentile ${{pct.toFixed(1)}}, ${{below.toLocaleString()}} ROIs below and ${{above.toLocaleString()}} at or above (of ${{n.toLocaleString()}} with a value)`;
+  readout.textContent = `Purple line at ${{fmt(value)}}: percentile ${{pct.toFixed(1)}}, ${{below.toLocaleString()}} ROIs below and ${{above.toLocaleString()}} at or above`;
+  // ROIs below the min, between, and above the max, for the thresholds currently entered
+  const minValue = canvas.dataset.min ? filterValue(canvas.dataset.min) : NaN;
+  const maxValue = canvas.dataset.max ? filterValue(canvas.dataset.max) : NaN;
+  const hasMin = Number.isFinite(minValue), hasMax = Number.isFinite(maxValue);
+  const nBelow = hasMin ? countBelow(sorted, minValue) : 0;
+  const nAbove = hasMax ? n - countAtOrBelow(sorted, maxValue) : 0;
+  const nBetween = Math.max(0, n - nBelow - nAbove);
+  const num = v => v.toLocaleString();
+  const ex = (text, v) => `${{text}}: <span class="excluded">${{num(v)}}</span>`;
+  const kept = (text, v) => `${{text}}: <span class="kept">${{num(v)}}</span>`;
+  thresholds.innerHTML = hasMin && hasMax
+    ? `${{ex(`Below min ${{fmt(minValue)}}`, nBelow)}} &middot; ${{kept("between", nBetween)}} &middot; ${{ex(`above max ${{fmt(maxValue)}}`, nAbove)}} <span class="note">(of ${{num(n)}} ROIs)</span>`
+    : hasMin ? `${{ex(`Below min ${{fmt(minValue)}}`, nBelow)}} &middot; ${{kept("at or above", nBetween)}} <span class="note">(of ${{num(n)}} ROIs)</span>`
+    : hasMax ? `${{kept(`At or below max ${{fmt(maxValue)}}`, nBetween)}} &middot; ${{ex("above", nAbove)}} <span class="note">(of ${{num(n)}} ROIs)</span>`
+    : `<span class="note">No threshold entered: type a value or drag a dashed line (${{num(n)}} ROIs with a value).</span>`;
   const rows = [["ROIs with a value", n.toLocaleString()], ["Minimum", fmt(sorted[0])], ["25th percentile", fmt(percentile(sorted, 0.25))],
                 ["Median", fmt(percentile(sorted, 0.5))], ["75th percentile", fmt(percentile(sorted, 0.75))], ["Maximum", fmt(sorted[n - 1])]];
   table.innerHTML = rows.map(([k, v]) => `<tr><th scope="row">${{k}}</th><td>${{v}}</td></tr>`).join("");
@@ -4038,6 +4126,7 @@ function drawMetricHistogram(canvas) {{
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = "#d0d5dd"; ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
   if (!values.length) {{
+    canvas._thresholdLines = [];
     drawHistogramProbe(canvas, ctx, values, null);
     return;
   }}
@@ -4106,6 +4195,7 @@ function drawMetricHistogram(canvas) {{
       if (a.left + a.width + 4 * r > b.left) b.y = labelY + 11 * r;  // still crowded: drop the second label a row
     }}
   }}
+  canvas._thresholdLines = placed.map(p => ({{x: p.x, inputId: p.bound === "min" ? canvas.dataset.min : canvas.dataset.max}}));
   for (const p of placed) {{
     ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(p.active ? 2 : 1.5, (p.active ? 1.5 : 1.2) * r);
     ctx.setLineDash(p.active ? [] : [4 * r, 3 * r]);
@@ -4124,6 +4214,36 @@ function drawMetricHistogram(canvas) {{
   ctx.textAlign = "center"; ctx.fillText(`Bin ${{fmt(binSize)}}`, pad + plotW / 2, yText);
   ctx.textAlign = "right"; ctx.fillText(fmt(hi), pad + plotW, yText);
   drawHistogramProbe(canvas, ctx, values, {{lo, hi, pad, plotW, plotTop, plotBottom, r}});
+}}
+// Each metric's distribution sits above its own min/max fields: the histogram panel and the
+// bound fields that precede it in the markup are wrapped into one block.
+function arrangeMetricBlocks() {{
+  document.querySelectorAll(".filter-controls").forEach(container => {{
+    const panels = [...container.querySelectorAll(":scope > details.metric-histogram-panel")];
+    if (!panels.length) return;
+    for (const details of panels) {{
+      const bounds = [];
+      let header = null;
+      let prev = details.previousElementSibling;
+      while (prev && bounds.length < 2 && (prev.tagName === "LABEL" || (prev.tagName === "SPAN" && !prev.textContent.trim()))) {{
+        bounds.unshift(prev);
+        prev = prev.previousElementSibling;
+      }}
+      if (prev && prev.classList.contains("custom-metric-header")) header = prev;
+      const block = document.createElement("div");
+      block.className = "metric-block";
+      (header || bounds[0] || details).before(block);
+      if (header) block.appendChild(header);
+      block.appendChild(details);
+      const row = document.createElement("div");
+      row.className = "metric-bounds";
+      for (const element of bounds) {{
+        if (element.tagName === "SPAN") element.remove(); else row.appendChild(element);
+      }}
+      block.appendChild(row);
+    }}
+    container.classList.add("metric-blocks");
+  }});
 }}
 function drawMetricHistograms() {{
   document.querySelectorAll(".metric-histogram-panel[open] .metric-histogram").forEach(drawMetricHistogram);
@@ -5295,6 +5415,7 @@ function setGbuSummaryVisible(show) {{
   const button = document.getElementById("toggleGbuSummary");
   if (!panel) return;
   panel.classList.toggle("minimized", !show);
+  document.querySelector(".gbu-transient-panel")?.classList.toggle("minimized", !show);
   if (button) button.textContent = show ? "Hide Summary by QC Label" : "Show Summary by QC Label";
   updateFovSideLayout();
   if (show) scheduleGbuSummaryDraw();
@@ -5304,9 +5425,11 @@ function updateFovSideLayout() {{
   const side = document.querySelector(".fov-side");
   const review = document.querySelector(".fov-review");
   if (!side || !review) return;
-  const anyShown = [...side.querySelectorAll(".gbu-summary, .oasis-diagnostics")].some(p => !p.classList.contains("minimized"));
+  const anyShown = [...side.querySelectorAll(".gbu-summary")].some(p => !p.classList.contains("minimized"));
   side.classList.toggle("empty", !anyShown);
   review.classList.toggle("oasis-collapsed", !anyShown);
+  const row = document.querySelector(".transient-row");
+  if (row) row.classList.toggle("empty", ![...row.querySelectorAll(".gbu-transient-panel, .oasis-diagnostics")].some(p => !p.classList.contains("minimized")));
   requestAnimationFrame(draw);
 }}
 
@@ -5463,20 +5586,23 @@ function drawGbuSummary() {{
   const total = Math.max(1, labels.length);
   const f = gbuCanvas("gbuFractionCanvas");
   if (f) {{
+    // horizontal bars: compact enough to share a row with the firing-rate plot
     const groups = GBU_GROUPS.concat([GBU_UNLABELED]);
-    const l = 50 * f.r, rr = 10 * f.r, t = 20 * f.r, b = 24 * f.r, pw = f.w - l - rr, ph = f.h - t - b;
-    drawAxes(f.ctx, f.w, f.h, l, t, pw, ph, "", "Fraction of ROIs", {{ yLabelX: 12 * f.r }});
-    gbuYTicks(f.ctx, l, t, ph, 0, 1, 4, f.r, 2);
-    const slot = pw / groups.length;
+    const ctx = f.ctx, r = f.r;
+    ctx.clearRect(0, 0, f.w, f.h);
+    ctx.font = `${{11 * r}}px Arial`;
+    const nameW = Math.max(...groups.map(g => ctx.measureText(g.name).width)) + 8 * r;
+    const valueW = ctx.measureText("100% (0000)").width + 6 * r;
+    const l = nameW, rr = valueW, t = 6 * r, b = 6 * r, pw = Math.max(10, f.w - l - rr), ph = f.h - t - b;
+    const slot = ph / groups.length;
+    ctx.strokeStyle = "#d0d5dd"; ctx.beginPath(); ctx.moveTo(l, t); ctx.lineTo(l, t + ph); ctx.stroke();
     groups.forEach((g, i) => {{
       const n = counts.get(g.code), frac = n / total;
-      const bw = slot * 0.62, x = l + i * slot + (slot - bw) / 2, y = t + (1 - frac) * ph;
-      f.ctx.fillStyle = g.color; f.ctx.fillRect(x, y, bw, t + ph - y);
-      f.ctx.font = `${{11 * f.r}}px Arial`; f.ctx.textAlign = "center";
-      f.ctx.fillStyle = "#344054"; f.ctx.textBaseline = "bottom";
-      f.ctx.fillText(`${{(100 * frac).toFixed(0)}}% (n = ${{n}})`, x + bw / 2, y - 2 * f.r);
-      f.ctx.fillStyle = "#475467"; f.ctx.textBaseline = "top";
-      f.ctx.fillText(g.name, x + bw / 2, t + ph + 5 * f.r);
+      const bh = slot * 0.6, y = t + i * slot + (slot - bh) / 2;
+      ctx.fillStyle = g.color; ctx.fillRect(l, y, Math.max(0, frac * pw), bh);
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#475467"; ctx.textAlign = "right"; ctx.fillText(g.name, l - 5 * r, y + bh / 2);
+      ctx.fillStyle = "#344054"; ctx.textAlign = "left"; ctx.fillText(`${{(100 * frac).toFixed(0)}}% (${{n}})`, l + frac * pw + 4 * r, y + bh / 2);
     }});
   }}
   const note = document.getElementById("gbuSummaryNote");
@@ -5688,37 +5814,7 @@ document.getElementById("closeSortDialog").addEventListener("click", () => {{
   closeDialog(sortDialog);
 }});
 document.getElementById("closeSortDialogTop").addEventListener("click", () => closeDialog(sortDialog));
-const dffFileInput = document.getElementById("dffFile");
-const oasisFileInput = document.getElementById("oasisFile");
 const customRoiUploadFileInput = document.getElementById("customRoiUploadFile");
-document.getElementById("loadDffFile").addEventListener("click", () => dffFileInput.click());
-dffFileInput.addEventListener("change", () => {{
-  const file = dffFileInput.files && dffFileInput.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {{
-    try {{
-      setDffFromArrayBuffer(reader.result);
-    }} catch (error) {{
-      document.getElementById("traceLoadNote").textContent = `Could not load dF/F file: ${{error.message}}`;
-    }}
-  }};
-  reader.readAsArrayBuffer(file);
-}});
-document.getElementById("loadOasisFile").addEventListener("click", () => oasisFileInput.click());
-oasisFileInput.addEventListener("change", () => {{
-  const file = oasisFileInput.files && oasisFileInput.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {{
-    try {{
-      setOasisFromArrayBuffer(reader.result);
-    }} catch (error) {{
-      document.getElementById("traceLoadNote").textContent = `Could not load inferred spikes file: ${{error.message}}`;
-    }}
-  }};
-  reader.readAsArrayBuffer(file);
-}});
 const customRoiUploadDialog = document.getElementById("customRoiUploadDialog");
 document.getElementById("openCustomRoiUploadDialog").addEventListener("click", () => {{
   renderAutoLoadedFileList();
@@ -6113,6 +6209,7 @@ updateFovSideLayout();
   element.addEventListener("change", evaluateFilter);
   element.addEventListener("input", drawMetricHistograms);
 }});
+arrangeMetricBlocks();
 document.querySelectorAll(".metric-histogram-panel").forEach(panel => {{
   panel.addEventListener("toggle", () => {{
     if (!panel.open) return;
