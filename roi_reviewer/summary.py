@@ -2229,6 +2229,12 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .viewer-column {{ display: flex; flex-direction: column; gap: 6px; }}
 .fov-row {{ display: grid; grid-template-columns: 1fr; gap: 6px; align-items: start; }}
 .fov-row, .fov-review {{ display: contents; }}
+.trace-panel {{ position: relative; }}
+.trace-panel .trace-header-row {{ padding-right: 30px; }}
+.load-info-icon {{ position: absolute; top: 7px; right: 8px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; color: #475467; font: italic 700 12px Georgia, "Times New Roman", serif; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 3; }}
+.load-info-icon:hover, .load-info-icon[aria-expanded="true"] {{ border-color: #175cd3; color: #175cd3; }}
+.load-info-icon.warn {{ border-color: #dc6803; color: #b54708; background: #fffaeb; }}
+.load-info-pop {{ position: absolute; top: 32px; right: 8px; max-width: min(460px, calc(100% - 16px)); padding: 8px 10px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 12px; line-height: 1.4; color: #344054; z-index: 4; }}
 .viewer-column {{ display: grid; grid-template-columns: auto 12px minmax(0, 1fr); grid-template-areas: "fov split side" "trace trace trace"; column-gap: 0; row-gap: 8px; align-items: start; }}
 .viewer-column.summary-hidden {{ grid-template-columns: auto 0 34px; }}
 #fovGrid {{ grid-area: fov; max-width: 100%; position: relative; }}
@@ -2895,7 +2901,8 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel trace-panel">
+        <button type="button" class="load-info-icon" id="traceLoadInfo" aria-label="dF/F and inferred spike loading" aria-expanded="false" title="dF/F and inferred spike loading">i</button>
         <div class="trace-header-row">
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
           <div class="trace-header-controls" id="traceOasisControls">
@@ -2923,7 +2930,7 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
           <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
-        <div class="note" id="traceLoadNote"></div>
+        <div class="load-info-pop" id="traceLoadNote" role="status" hidden></div>
         <canvas id="traceCanvas"></canvas>
         <div class="note">Wheel or drag to zoom/pan time. Double-click to reset.</div>
         <div class="controls">
@@ -3178,22 +3185,35 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
 // for a page opened from disk (file://). The notes below say which case applies.
 const openedFromDisk = window.location.protocol === "file:";
 const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Open this page through a web server (an http:// or https:// address, for example python -m http.server run in this folder) to load them automatically.";
+function setLoadInfoState(missing) {{
+  const button = document.getElementById("traceLoadInfo");
+  if (button) button.classList.toggle("warn", !!missing);
+}}
+function toggleLoadInfo(force) {{
+  const button = document.getElementById("traceLoadInfo"), pop = document.getElementById("traceLoadNote");
+  if (!button || !pop) return;
+  const open = force === undefined ? pop.hidden : force;
+  pop.hidden = !open || !pop.textContent.trim();
+  button.setAttribute("aria-expanded", String(!pop.hidden));
+}}
 function updateSidecarLoadNote() {{
   const note = document.getElementById("traceLoadNote");
   const parts = [];
   if (data.dffStorageMode === "file") {{
-    parts.push(dff ? `dF/F loaded (${{data.dffSidecarName}})` : `dF/F not loaded (${{data.dffSidecarName || "sidecar .npy"}})`);
+    parts.push(dff ? "dF/F loaded" : "dF/F not loaded");
   }}
   if (data.oasisAvailable && data.oasisStorageMode === "file") {{
-    parts.push(oasisSpikes ? `inferred spikes loaded (${{data.oasisSidecarName}})` : `inferred spikes not loaded (${{data.oasisSidecarName || "sidecar .npy"}})`);
+    parts.push(oasisSpikes ? "inferred spikes loaded" : "inferred spikes not loaded");
   }}
   if (parts.length) {{
     const missing = (data.dffStorageMode === "file" && !dff)
       || (data.oasisAvailable && data.oasisStorageMode === "file" && !oasisSpikes);
     const advice = !missing ? ""
       : openedFromDisk ? ` ${{SIDECAR_DISK_ADVICE}}`
-      : ` They were not found beside this page: check that the file(s) are in the same folder under the names shown, or select them with the buttons above.`;
-    note.textContent = `${{parts.join("; ")}}.${{advice}}`;
+      : ` They were not found beside this page: check that the .npy files are in the same folder as this HTML, named after the session (SESSION_dff.npy and SESSION_oasis_spikes.npy).`;
+    const text = `${{parts.join("; ")}}.${{advice}}`;
+    note.textContent = text.startsWith("dF/F") ? text : text.charAt(0).toUpperCase() + text.slice(1);
+    setLoadInfoState(missing);
   }}
 }}
 function renderAutoLoadedFileList() {{
@@ -3255,6 +3275,11 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
     : data.oasisAvailable
       ? ``
       : `No inferred spikes were found for this session, so spike overlays and fit metrics are not shown.`;
+  if (!note.textContent) note.textContent = "dF/F and inferred spikes are embedded in this page.";
+  setLoadInfoState(usesSidecars && openedFromDisk);
+  document.getElementById("traceLoadInfo")?.addEventListener("click", event => {{ event.stopPropagation(); toggleLoadInfo(); }});
+  document.addEventListener("click", event => {{ if (!event.target.closest("#traceLoadNote, #traceLoadInfo")) toggleLoadInfo(false); }});
+  document.addEventListener("keydown", event => {{ if (event.key === "Escape") toggleLoadInfo(false); }});
 }}
 // The Suite2p and OASIS links are shown only when the inferred-spike file says it came from them
 // (spikes.h5 attribute `method`, e.g. suite2p.extraction.dcnv.oasis). A replacement array loaded
@@ -4982,7 +5007,7 @@ function drawStack() {{
     return;
   }}
   if (!dff) {{
-    ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center"; ctx.fillText(`dF/F not loaded: open this page through a web server so ${{data.dffSidecarName || "the dF/F .npy file"}} beside it loads.`, l + pw / 2, t + ph / 2);
+    ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center"; ctx.fillText("Load dF/F and inferred spikes files to view stacked traces (see (i) for auto loading info)", l + pw / 2, t + ph / 2);
     return;
   }}
   const ys = Math.max(0, Math.floor(y0)), ye = Math.min(visibleRois.length - 1, Math.ceil(y1));
@@ -5055,7 +5080,7 @@ function drawTrace() {{
   const w=canvas.width,h=canvas.height,l=62,r=16,t=14,b=56,pw=w-l-r,ph=h-t-b, tr=trace(selected);
   ctx.clearRect(0,0,w,h); ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,l,t,pw,ph,"time (s)","dF/F"); drawTimeGrid(ctx,l,t,pw,ph);
   if (!tr) {{
-    ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center"; ctx.fillText(`dF/F not loaded: open this page through a web server so ${{data.dffSidecarName || "the dF/F .npy file"}} beside it loads.`, l + pw / 2, t + ph / 2);
+    ctx.fillStyle = "#475467"; ctx.font = `${{14 * (window.devicePixelRatio || 1)}}px Arial`; ctx.textAlign = "center"; ctx.fillText("Load dF/F and inferred spikes files to view for selected ROI (see (i) for auto loading info)", l + pw / 2, t + ph / 2);
     return;
   }}
   const xs=Math.max(0,Math.floor(x0)), xe=Math.min(data.nFrames-1,Math.ceil(x1)); let lo=Infinity,hi=-Infinity;
