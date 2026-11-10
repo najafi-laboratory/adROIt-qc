@@ -65,6 +65,8 @@ _LAST_BUILD_WAS_HTML_ONLY = False  # set by create_preprocessing_summary for mai
 EMBEDDED_DFF_BYTE_LIMIT = 80 * 1024 * 1024
 EMBEDDED_DFF_BASE64_EXPANSION = 4 / 3
 EMBEDDED_DFF_HTML_OVERHEAD = 2 * 1024 * 1024
+# Largest ROI x frame count whose float32 array is embedded in the HTML rather than written as a .npy sidecar.
+EMBEDDED_MAX_ROI_FRAMES = int((EMBEDDED_DFF_BYTE_LIMIT - EMBEDDED_DFF_HTML_OVERHEAD) / EMBEDDED_DFF_BASE64_EXPANSION / 4)
 
 
 @dataclass(frozen=True)
@@ -2234,6 +2236,8 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .load-info-icon {{ position: absolute; top: 7px; right: 8px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; color: #475467; font: italic 700 12px Georgia, "Times New Roman", serif; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 3; }}
 .load-info-icon:hover, .load-info-icon[aria-expanded="true"] {{ border-color: #175cd3; color: #175cd3; }}
 .load-info-icon.warn {{ border-color: #dc6803; color: #b54708; background: #fffaeb; }}
+.load-info-rule {{ margin: 6px 0 0; color: #475467; }}
+.load-info-rule code {{ font-size: 11px; }}
 .load-info-pop {{ position: absolute; top: 32px; right: 8px; max-width: min(460px, calc(100% - 16px)); padding: 8px 10px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 12px; line-height: 1.4; color: #344054; z-index: 4; }}
 .viewer-column {{ display: grid; grid-template-columns: auto 12px minmax(0, 1fr); grid-template-areas: "fov split side" "trace trace trace"; column-gap: 0; row-gap: 8px; align-items: start; }}
 .viewer-column.summary-hidden {{ grid-template-columns: auto 0 34px; }}
@@ -2411,29 +2415,31 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 
 .oasis-diagnostics .note {{ margin-bottom: 6px; }}
 
-.fov-side {{ flex: 1 1 0; min-width: 0; overflow-x: hidden; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }}
+.fov-side {{ flex: 1 1 0; min-width: 0; overflow-x: clip; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }}
 .summary-header {{ display: flex; gap: 8px; align-items: center; justify-content: space-between; height: 28px; margin-bottom: 0; }}
 .summary-header .title {{ margin-bottom: 0; }}
 .summary-section {{ display: flex; flex-direction: column; min-height: 0; }}
-.summary-fraction {{ flex: 0 0 auto; }}
-.summary-fraction .canvas-box {{ flex: 0 0 auto; height: 64px; }}
-.summary-spike-area {{ position: relative; flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; gap: 6px; }}
+.summary-grid {{ flex: 1 1 0; min-height: 0; min-width: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; align-items: stretch; }}
+.summary-fraction {{ flex: none; align-self: start; }}
+.summary-right {{ display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; }}
+.head-actions {{ display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }}
+.head-actions .info-button {{ font-size: 11px; padding: 1px 6px; white-space: nowrap; }}
+.summary-fraction .canvas-box {{ flex: none; width: 130px; height: 150px; }}
 .summary-rate {{ flex: 1 1 0; }}
-.summary-transient {{ flex: 1.4 1 0; }}
+.summary-transient {{ flex: 1.3 1 0; }}
+.transient-box > canvas[hidden] {{ display: none; }}
 .canvas-box {{ position: relative; flex: 1 1 0; min-height: 60px; }}
 .canvas-box > canvas {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
-.gbu-plot-head {{ display: flex; gap: 6px; align-items: center; justify-content: space-between; margin: 2px 0 3px; }}
+.gbu-plot-head {{ display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; justify-content: space-between; margin: 2px 0 3px; min-width: 0; }}
+.gbu-plot-title {{ white-space: nowrap; }}
 .gbu-plot-head .gbu-plot-title {{ margin: 0; }}
 .gbu-subtitle {{ font-size: 11px; color: #475467; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 .gbu-subtitle .note {{ font-size: 11px; }}
-.transient-pair {{ flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 6px; }}
-.transient-pair > div {{ display: flex; flex-direction: column; min-height: 0; min-width: 0; }}
 .rate-toggle {{ display: inline-flex; }}
-.rate-toggle button {{ font-size: 12px; padding: 1px 8px; border-radius: 0; }}
+.rate-toggle button {{ font-size: 11px; padding: 1px 6px; border-radius: 0; white-space: nowrap; }}
 .rate-toggle button:first-child {{ border-radius: 5px 0 0 5px; }}
 .rate-toggle button:last-child {{ border-radius: 0 5px 5px 0; margin-left: -1px; }}
 .rate-toggle button[aria-pressed="true"] {{ background: #eef4ff; border-color: #175cd3; color: #175cd3; font-weight: 600; position: relative; }}
-.summary-missing {{ position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 10px 16px; color: #475467; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; overflow: hidden; background: rgba(255, 255, 255, 0.94); border-radius: 4px; }}
 .gbu-summary {{ width: 100%; }}
 .gbu-plot-title {{ font-size: 12px; font-weight: 600; color: #344054; margin: 8px 0 3px; }}
 
@@ -2868,33 +2874,38 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
                 <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#summary-of-good-bad-and-unsure-rois" target="_blank" rel="noopener noreferrer">How the summary is computed</a></p>
               </div>
             <div class="note" id="gbuSummaryNote"></div>
-            <div class="summary-section summary-fraction">
-              <div class="gbu-plot-title">ROIs by label</div>
-              <div class="canvas-box"><canvas id="gbuFractionCanvas"></canvas></div>
-            </div>
-            <div class="summary-spike-area">
-              <div class="summary-section summary-rate">
-                <div class="gbu-plot-head">
-                  <div class="gbu-plot-title" id="gbuRateTitle">Firing rate by label</div>
-                  <div class="rate-toggle" role="group" aria-label="Firing rate view"><button type="button" data-rate-mode="label" aria-pressed="true">By label</button><button type="button" data-rate-mode="roi" aria-pressed="false">Selected ROI</button></div>
-                </div>
-                <div class="canvas-box"><canvas id="gbuRateCanvas"></canvas></div>
+            <div class="summary-grid">
+              <div class="summary-section summary-fraction">
+                <div class="gbu-plot-title">ROIs by label</div>
+                <div class="canvas-box"><canvas id="gbuFractionCanvas"></canvas></div>
               </div>
-              <div class="summary-section summary-transient">
-                <div class="gbu-plot-head">
-                  <div class="gbu-plot-title">Average calcium transient</div>
-                  <button class="info-button" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false">Read more</button>
+              <div class="summary-right">
+                <div class="summary-section summary-rate">
+                  <div class="gbu-plot-head">
+                    <div class="gbu-plot-title" id="gbuRateTitle">Firing rate</div>
+                    <div class="rate-toggle" role="group" aria-label="Firing rate view"><button type="button" data-rate-mode="label" aria-pressed="true">By label</button><button type="button" data-rate-mode="roi" aria-pressed="false">Selected ROI</button></div>
+                  </div>
+                  <div class="canvas-box"><canvas id="gbuRateCanvas"></canvas></div>
                 </div>
-                <div id="oasisDiagnosticsHelp" class="info-box" hidden>
-                  <p>The blue line averages the selected ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold. The red curve is an exponential decay from its peak with the empirical decay tau, the time the average takes to fall to 1/e of its peak.</p>
-                  <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>
-                </div>
-                <div class="transient-pair">
-                  <div><div class="gbu-subtitle">Selected ROI <span class="note" id="oasisDiagnosticsSummary"></span></div><div class="canvas-box"><canvas id="oasisTransientCanvas"></canvas></div></div>
-                  <div><div class="gbu-subtitle">By label (mean &plusmn; s.e.m. across ROIs)</div><div class="canvas-box"><canvas id="gbuTransientCanvas"></canvas></div></div>
+                <div class="summary-section summary-transient">
+                  <div class="gbu-plot-head">
+                    <div class="gbu-plot-title" id="gbuTransientTitle">Average transient</div>
+                    <div class="head-actions">
+                      <div class="rate-toggle" role="group" aria-label="Average transient view"><button type="button" data-transient-mode="label" aria-pressed="true">By label</button><button type="button" data-transient-mode="roi" aria-pressed="false">Selected ROI</button></div>
+                      <button class="info-button" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false">Read more</button>
+                    </div>
+                  </div>
+                  <div id="oasisDiagnosticsHelp" class="info-box" hidden>
+                    <p><strong>By label</strong> averages each labeled ROI&apos;s spike-triggered dF/F (mean &plusmn; s.e.m. across ROIs). <strong>Selected ROI</strong> averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold, with an exponential decay fit (red) whose tau is the time to fall to 1/e of the peak.</p>
+                    <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>
+                  </div>
+                  <div class="gbu-subtitle" id="transientSubtitle">By label, mean &plusmn; s.e.m. across ROIs <span class="note" id="oasisDiagnosticsSummary"></span></div>
+                  <div class="canvas-box transient-box">
+                    <canvas id="gbuTransientCanvas"></canvas>
+                    <canvas id="oasisTransientCanvas" hidden></canvas>
+                  </div>
                 </div>
               </div>
-              <div class="summary-missing" id="summaryMissing" hidden></div>
             </div>
           </div>
           <button class="summary-show-tab" id="summaryShow" type="button">Show summary by QC label</button>
@@ -2930,7 +2941,11 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
           <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
-        <div class="load-info-pop" id="traceLoadNote" role="status" hidden></div>
+        <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
+          <div id="traceLoadStatus"></div>
+          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address).</p>
+          <p class="load-info-rule" id="traceLoadSession"></p>
+        </div>
         <canvas id="traceCanvas"></canvas>
         <div class="note">Wheel or drag to zoom/pan time. Double-click to reset.</div>
         <div class="controls">
@@ -3175,7 +3190,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
   oasisDiagnosticsCache.clear();
   invalidateGbuSummary();
   if (!silent) {{
-    document.getElementById("traceLoadNote").textContent = `Loaded dF/F file with ${{data.nRois}} ROIs x ${{data.nFrames}} frames.`;
+    document.getElementById("traceLoadStatus").textContent = `Loaded dF/F file with ${{data.nRois}} ROIs x ${{data.nFrames}} frames.`;
   }} else {{
     updateSidecarLoadNote();
   }}
@@ -3193,11 +3208,11 @@ function toggleLoadInfo(force) {{
   const button = document.getElementById("traceLoadInfo"), pop = document.getElementById("traceLoadNote");
   if (!button || !pop) return;
   const open = force === undefined ? pop.hidden : force;
-  pop.hidden = !open || !pop.textContent.trim();
+  pop.hidden = !open;
   button.setAttribute("aria-expanded", String(!pop.hidden));
 }}
 function updateSidecarLoadNote() {{
-  const note = document.getElementById("traceLoadNote");
+  const note = document.getElementById("traceLoadStatus");
   const parts = [];
   if (data.dffStorageMode === "file") {{
     parts.push(dff ? "dF/F loaded" : "dF/F not loaded");
@@ -3266,7 +3281,13 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
 {{
   // dF/F and inferred spikes come from the session (embedded, or .npy sidecars beside the HTML);
   // there are no file pickers, so a sidecar session must be opened through a web server.
-  const note = document.getElementById("traceLoadNote");
+  const note = document.getElementById("traceLoadStatus");
+  const sessionLine = document.getElementById("traceLoadSession");
+  if (sessionLine) {{
+    const values = data.nRois * data.nFrames;
+    const mode = data.dffStorageMode === "file" ? "separate .npy files" : "embedded in this HTML";
+    sessionLine.textContent = `This session: ${{data.nRois.toLocaleString()}} ROIs × ${{data.nFrames.toLocaleString()}} frames = ${{values.toLocaleString()}}, so its arrays are ${{mode}}.`;
+  }}
   const usesSidecars = data.dffStorageMode === "file" || data.oasisStorageMode === "file";
   note.textContent = usesSidecars
     ? (openedFromDisk
@@ -3315,7 +3336,7 @@ function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
   document.getElementById("traceOasisControls").classList.add("visible");
   configureOasisThresholdControls();
   if (!silent) {{
-    document.getElementById("traceLoadNote").textContent = `Loaded inferred spikes file with ${{data.nRois}} ROIs x ${{data.nFrames}} frames.`;
+    document.getElementById("traceLoadStatus").textContent = `Loaded inferred spikes file with ${{data.nRois}} ROIs x ${{data.nFrames}} frames.`;
   }} else {{
     updateSidecarLoadNote();
   }}
@@ -5440,16 +5461,20 @@ function drawLineSeries(ctx, series, xOf, yOf, color, lineWidth = 1.5) {{
 }}
 function drawOasisDiagnostics() {{
   // Selected ROI's spike-triggered average transient and its exponential decay model,
-  // drawn compactly beside the by-label average in the summary column.
+  // shown in the summary column when its average-transient toggle is on Selected ROI.
+  if (document.getElementById("fovReview")?.classList.contains("summary-hidden") || gbuTransientMode !== "roi") return;
   const summary = document.getElementById("oasisDiagnosticsSummary");
   const c = gbuCanvas("oasisTransientCanvas");
   if (!summary || !c) return;
-  if (document.getElementById("fovReview")?.classList.contains("summary-hidden")) return;
-  if (!data.oasisAvailable || !dff || !oasisSpikes) {{ summary.textContent = ""; return; }}
+  if (!data.oasisAvailable || !dff || !oasisSpikes) {{
+    summary.textContent = "";
+    gbuEmptyPlot(c, "Time from inferred spike (s)", "dF/F", "Load dF/F and inferred spikes files to view the selected ROI's average transient");
+    return;
+  }}
   const diagnostics = selectedOasisDiagnostics(selected, oasisEventThreshold);
   if (!diagnostics || !diagnostics.events.length) {{
     summary.textContent = "";
-    gbuMessage(c, `No inferred spikes above ${{fmt(oasisEventThreshold)}} for this ROI`);
+    gbuEmptyPlot(c, "Time from inferred spike (s)", "dF/F", `No inferred spikes above ${{fmt(oasisEventThreshold)}} for this ROI`);
     return;
   }}
   summary.textContent = `(${{diagnostics.events.length}} spikes above ${{fmt(oasisEventThreshold)}})`;
@@ -5500,7 +5525,12 @@ function fovWidthLimits() {{
   const max = Math.max(200, total - (summaryHidden() ? 40 : 12 + 260));
   return {{ min: Math.min(max, 180 * fovChannelCount()), max }};
 }}
-function defaultFovGridWidth() {{ return fovChannelCount() > 1 ? 720 : 520; }}  // the sizes used before resizing was added
+function defaultFovGridWidth() {{
+  // the sizes used before resizing was added, reduced only as far as needed to leave the summary column 380 px
+  const preferred = fovChannelCount() > 1 ? 720 : 520;
+  if (summaryHidden()) return preferred;
+  return Math.max(180 * fovChannelCount(), Math.min(preferred, document.querySelector(".viewer-column").clientWidth - 12 - 380));
+}}
 function layoutFovRow() {{
   // The summary column sits beside the field of view and stops at its bottom edge; the dF/F
   // trace spans the full width underneath. The field of view keeps square images, so its width
@@ -5690,17 +5720,13 @@ function gbuKde(values, grid) {{
     return s * norm;
   }});
 }}
-function summaryMissingText() {{
-  if (sidecarsPending > 0 && window.location.protocol !== "file:") return "Loading dF/F and inferred spikes...";
-  if (!data.oasisAvailable) return "Needs inferred spikes: none were found for this session.";
-  return window.location.protocol === "file:"
-    ? "Needs dF/F and inferred spikes. Open this page through a web server so the .npy files beside it load."
-    : "Needs dF/F and inferred spikes: the .npy files were not found beside this page.";
-}}
 function drawSelectedRoiRate(rc) {{
   // Firing rate of the selected ROI in time bins across the session, from inferred spikes above the
   // current amplitude threshold (the dashed line is its mean rate over the whole session).
-  if (!data.oasisAvailable || !dff || !oasisSpikes) return;
+  if (!data.oasisAvailable || !dff || !oasisSpikes) {{
+    gbuEmptyPlot(rc, "Time (s)", "Events/s", "Load inferred spikes file to view the selected ROI's firing rate over time");
+    return;
+  }}
   const d = selectedOasisDiagnostics(selected, oasisEventThreshold);
   const events = d ? d.events : [];
   const seconds = Math.max(1 / data.frameRate, data.nFrames / data.frameRate);
@@ -5736,14 +5762,26 @@ function drawSelectedRoiRate(rc) {{
   ctx.fillStyle = "#344054";
   ctx.fillText(`Mean ${{meanRate.toPrecision(3)}}/s (${{events.length.toLocaleString()}} spikes above ${{fmt(oasisEventThreshold)}})`, l + pw - 4 * r, t + 18 * r);
 }}
+function gbuEmptyPlot(c, xLabel, yLabel, text) {{
+  // Axes drawn before the data exist, so the plot's place and scale are visible, with a centered
+  // gray message (wrapped to the plot width) saying what is needed to fill it.
+  const r = c.r, l = 46 * r, rr = 8 * r, t = 8 * r, b = 32 * r, pw = c.w - l - rr, ph = c.h - t - b;
+  drawAxes(c.ctx, c.w, c.h, l, t, pw, ph, xLabel, yLabel, {{ xLabelY: c.h - 4 * r, yLabelX: 10 * r }});
+  const ctx = c.ctx;
+  ctx.fillStyle = "#667085"; ctx.font = `${{11 * r}}px Arial`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const lines = [];
+  let line = "";
+  for (const word of String(text).split(" ")) {{
+    const next = line ? `${{line}} ${{word}}` : word;
+    if (ctx.measureText(next).width > pw - 16 * r && line) {{ lines.push(line); line = word; }} else line = next;
+  }}
+  if (line) lines.push(line);
+  const lh = 14 * r, y0 = t + ph / 2 - (lines.length - 1) * lh / 2;
+  lines.forEach((s, i) => ctx.fillText(s, l + pw / 2, y0 + i * lh));
+}}
+var gbuTransientMode = "label";  // "label": mean transient per label; "roi": selected ROI with its decay fit
 function drawGbuSummary() {{
   if (document.getElementById("fovReview")?.classList.contains("summary-hidden")) return;  // hidden: redrawn when shown again
-  const missing = document.getElementById("summaryMissing");
-  if (missing) {{
-    const absent = !data.oasisAvailable || !dff || !oasisSpikes;
-    missing.hidden = !absent;
-    if (absent) missing.textContent = summaryMissingText();
-  }}
   const counts = new Map([[1, 0], [0, 0], [2, 0], [-1, 0]]);
   for (const value of labels) {{
     const key = value === 1 || value === 0 || value === 2 ? value : -1;
@@ -5752,27 +5790,28 @@ function drawGbuSummary() {{
   const total = Math.max(1, labels.length);
   const f = gbuCanvas("gbuFractionCanvas");
   if (f) {{
-    // horizontal bars: compact enough to share a row with the firing-rate plot
+    // vertical bars at a fixed size: one per label, percentage and count above, name below
     const groups = GBU_GROUPS.concat([GBU_UNLABELED]);
     const ctx = f.ctx, r = f.r;
-    ctx.clearRect(0, 0, f.w, f.h);
-    ctx.font = `${{11 * r}}px Arial`;
-    const nameW = Math.max(...groups.map(g => ctx.measureText(g.name).width)) + 8 * r;
-    const valueW = ctx.measureText("100% (0000)").width + 6 * r;
-    const l = nameW, rr = valueW, t = 6 * r, b = 6 * r, pw = Math.max(10, f.w - l - rr), ph = f.h - t - b;
-    const slot = ph / groups.length;
-    ctx.strokeStyle = "#d0d5dd"; ctx.beginPath(); ctx.moveTo(l, t); ctx.lineTo(l, t + ph); ctx.stroke();
+    const l = 4 * r, rr = 4 * r, t = 28 * r, b = 30 * r, pw = f.w - l - rr, ph = f.h - t - b;
+    const slot = pw / groups.length, bw = slot * 0.62;
+    ctx.strokeStyle = "#d0d5dd"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(l, t + ph); ctx.lineTo(l + pw, t + ph); ctx.stroke();
     groups.forEach((g, i) => {{
       const n = counts.get(g.code), frac = n / total;
-      const bh = slot * 0.6, y = t + i * slot + (slot - bh) / 2;
-      ctx.fillStyle = g.color; ctx.fillRect(l, y, Math.max(0, frac * pw), bh);
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#475467"; ctx.textAlign = "right"; ctx.fillText(g.name, l - 5 * r, y + bh / 2);
-      ctx.fillStyle = "#344054"; ctx.textAlign = "left"; ctx.fillText(`${{(100 * frac).toFixed(0)}}% (${{n}})`, l + frac * pw + 4 * r, y + bh / 2);
+      const cx = l + (i + 0.5) * slot, h = frac * ph, y = t + ph - h;
+      ctx.fillStyle = g.color; ctx.fillRect(cx - bw / 2, y, bw, h);
+      ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      ctx.fillStyle = "#344054"; ctx.font = `${{9.5 * r}}px Arial`;
+      ctx.fillText(`${{(100 * frac).toFixed(0)}}%`, cx, y - 12 * r);
+      ctx.fillStyle = "#667085"; ctx.fillText(`(${{n}})`, cx, y - 2 * r);
+      ctx.textBaseline = "top"; ctx.fillStyle = "#475467";
+      const words = g.name.split(" ");
+      words.forEach((word, k) => ctx.fillText(word, cx, t + ph + 4 * r + k * 11 * r));
     }});
   }}
   const note = document.getElementById("gbuSummaryNote");
-  const tc = gbuCanvas("gbuTransientCanvas");
+  const tc = gbuTransientMode === "label" ? gbuCanvas("gbuTransientCanvas") : null;
+  if (gbuTransientMode === "roi") drawOasisDiagnostics();
   const rc = gbuCanvas("gbuRateCanvas");
   if (rc && gbuRateMode === "roi") drawSelectedRoiRate(rc);
   const spikesMissing = !data.oasisAvailable || !dff || !oasisSpikes;
@@ -5784,9 +5823,9 @@ function drawGbuSummary() {{
       : `Computing per-ROI transients and firing rates: ${{Math.round(100 * gbuProgress)}}%`;
   }}
   if (!ready) {{
-    const message = spikesMissing ? "Needs dF/F and inferred spikes" : "Computing...";
-    if (tc) gbuMessage(tc, message);
-    if (rc && gbuRateMode !== "roi") gbuMessage(rc, message);
+    const loading = sidecarsPending > 0 && window.location.protocol !== "file:";
+    if (tc) gbuEmptyPlot(tc, "Time from inferred spike (s)", "dF/F", spikesMissing ? (loading ? "Loading dF/F and inferred spikes..." : "Load dF/F and inferred spikes files to view average transients of ROIs by label") : "Computing...");
+    if (rc && gbuRateMode !== "roi") gbuEmptyPlot(rc, "Firing rate (events/s)", "Density", spikesMissing ? (loading ? "Loading inferred spikes..." : "Load inferred spikes file to view firing rate distribution of ROIs by label") : "Computing...");
     return;
   }}
   if (tc) {{
@@ -5818,7 +5857,7 @@ function drawGbuSummary() {{
     }}
     if (!series.length) {{
       const anyLabeled = counts.get(1) + counts.get(0) + counts.get(2) > 0;
-      gbuMessage(tc, anyLabeled ? "No good, bad or unsure ROI has an inferred spike above its threshold"
+      gbuEmptyPlot(tc, "Time from inferred spike (s)", "dF/F", anyLabeled ? "No good, bad or unsure ROI has an inferred spike above its threshold"
                                 : "Label ROIs as good, bad or unsure to see their average transients");
     }} else {{
       const pad = (yMax - yMin) * 0.1 || 0.1; yMin -= pad; yMax += pad;
@@ -6356,11 +6395,22 @@ document.getElementById("toggleSideMenu").addEventListener("click", () => {{
 startGbuSummary();
 document.getElementById("summaryHide")?.addEventListener("click", () => setGbuSummaryVisible(false));
 document.getElementById("summaryShow")?.addEventListener("click", () => setGbuSummaryVisible(true));
-document.querySelectorAll(".rate-toggle button").forEach(button => {{
+document.querySelectorAll("[data-rate-mode]").forEach(button => {{
   button.addEventListener("click", () => {{
     gbuRateMode = button.dataset.rateMode;
-    document.querySelectorAll(".rate-toggle button").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
-    document.getElementById("gbuRateTitle").textContent = gbuRateMode === "roi" ? "Firing rate of the selected ROI over time" : "Firing rate by label";
+    document.querySelectorAll("[data-rate-mode]").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
+    scheduleGbuSummaryDraw();
+  }});
+}});
+document.querySelectorAll("[data-transient-mode]").forEach(button => {{
+  button.addEventListener("click", () => {{
+    gbuTransientMode = button.dataset.transientMode;
+    document.querySelectorAll("[data-transient-mode]").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
+    const roi = gbuTransientMode === "roi";
+    document.getElementById("gbuTransientCanvas").hidden = roi;
+    document.getElementById("oasisTransientCanvas").hidden = !roi;
+    const sub = document.getElementById("transientSubtitle");
+    sub.firstChild.textContent = roi ? "Selected ROI, with exponential decay fit " : "By label, mean \u00b1 s.e.m. across ROIs ";
     scheduleGbuSummaryDraw();
   }});
 }});
