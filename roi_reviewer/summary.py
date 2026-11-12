@@ -2555,24 +2555,24 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div id="customMetricSources" class="info-box" hidden>
         <p>Uploaded ROI metrics are your own per-ROI values, given with <code>--custom-roi-metrics</code> at generation or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Each column other than <code>roi_index</code> becomes a metric, and its <strong>Section</strong> menu moves it to any section of this menu and the Sort menu.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
-        <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
-0,0.82,1530
-1,0.41,212
-2,0.67,880</pre>
+        <pre class="info-example">roi_index,roi_size,snr
+0,112,4.2
+1,86,1.8
+2,140,3.1</pre>
         <p class="info-example-label">JSON, one array per metric (qc_metrics.json)</p>
         <pre class="info-example">{{
-  "local_contrast": [0.82, 0.41, 0.67],
-  "tdtomato_intensity": [1530, 212, 880]
+  "roi_size": [112, 86, 140],
+  "snr": [4.2, 1.8, 3.1]
 }}</pre>
         <p class="info-example-label">JSON, one object per ROI</p>
         <pre class="info-example">[
-  {{"roi_index": 0, "local_contrast": 0.82, "tdtomato_intensity": 1530}},
-  {{"roi_index": 1, "local_contrast": 0.41, "tdtomato_intensity": 212}}
+  {{"roi_index": 0, "roi_size": 112, "snr": 4.2}},
+  {{"roi_index": 1, "roi_size": 86, "snr": 1.8}}
 ]</pre>
         <p class="info-example-label">NumPy, command line only</p>
         <pre class="info-example">import numpy as np
 # command line only (--custom-roi-metrics): one value per ROI, in original-index order
-np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity)</pre>
+np.savez("qc_metrics.npz", roi_size=sizes, snr=snr)</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploaded-roi-metrics" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
       </div>
       <div class="filter-controls">
@@ -2657,9 +2657,9 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
     "aspectMax": 1.5,
     "roiAreaMin": 40,
     "cellTypeFilter": ["1"],
-    "customMetrics": {{"local_contrast": {{"min": 0.3, "max": null}}}}
+    "customMetrics": {{"snr": {{"min": 2.0, "max": null}}}}
   }},
-  "sort": {{"metrics": ["custom:local_contrast"], "direction": "desc"}}
+  "sort": {{"metrics": ["custom:snr"], "direction": "desc"}}
 }}</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#saving-and-importing-filter-sets" target="_blank" rel="noopener noreferrer">Rules for filter set files</a></p>
       </div>
@@ -2828,14 +2828,14 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
       <div class="info-box">
         <p>QC metric files add your own numeric per-ROI values, and cell identity files add an integer code, a name or both per ROI; both accept CSV, TSV, TXT and JSON. <code>roi_index</code> is the ROI's 0-based original index, and without it row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
-        <pre class="info-example">roi_index,local_contrast,tdtomato_intensity
-0,0.82,1530
-1,0.41,212
-2,0.67,880</pre>
+        <pre class="info-example">roi_index,roi_size,snr
+0,112,4.2
+1,86,1.8
+2,140,3.1</pre>
         <p class="info-example-label">JSON, one array per metric</p>
         <pre class="info-example">{{
-  "local_contrast": [0.82, 0.41, 0.67],
-  "tdtomato_intensity": [1530, 212, 880]
+  "roi_size": [112, 86, 140],
+  "snr": [4.2, 1.8, 3.1]
 }}</pre>
         <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
         <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
