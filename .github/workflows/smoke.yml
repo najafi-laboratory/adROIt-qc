@@ -93,7 +93,7 @@ jobs:
           full.write_text(
               "name: t\nsession_path: s\noutput_dir: o\ninput_layout: external_rois\n"
               "roi_index_label: Original Index\nfilter_set: all_rois\n"
-              "initialize_labels_from_model_scores: true\ncustom_roi_metrics: [a.csv, b.npy]\n"
+              "initialize_labels_from_model_scores: true\ncustom_roi_metrics: [a.csv, b.tsv]\n"
               "pdf_name: p.pdf\nhtml_name: h.html\narchive_output: true\narchive_name: z.zip\n")
           out = subprocess.run([sys.executable, "scripts/build_reviewer.py", str(full), "--dry-run"],
                                capture_output=True, text=True, check=True).stdout

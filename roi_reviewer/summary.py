@@ -953,8 +953,19 @@ def _roi_index_header(headers: Sequence[str], source: Path | str) -> str | None:
     return None
 
 
+def _table_delimiter(path: Path) -> str:
+    """Tab for .tsv, comma for .csv; a .txt file is read as tab-separated when its header has a tab."""
+    suffix = path.suffix.lower()
+    if suffix == ".tsv":
+        return "\t"
+    if suffix == ".txt":
+        with path.open(newline="") as handle:
+            return "\t" if "\t" in handle.readline() else ","
+    return ","
+
+
 def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarray) -> dict[str, Any]:
-    delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+    delimiter = _table_delimiter(path)
     with path.open(newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter=delimiter))
     if not rows:
@@ -980,110 +991,6 @@ def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarr
             suite2p_indices=suite2p_indices,
             roi_index_values=roi_index_values,
         )
-    return payload
-
-
-def _load_custom_metric_json(path: Path, n_rois: int, suite2p_indices: np.ndarray) -> dict[str, Any]:
-    with path.open() as handle:
-        raw = json.load(handle)
-    payload = _empty_custom_metrics(n_rois)
-    payload["sources"].append(str(path))
-    if isinstance(raw, dict) and "metrics" in raw:
-        raw = raw["metrics"]
-    if isinstance(raw, dict):
-        for name, values in raw.items():
-            if isinstance(values, dict) and "values" in values:
-                _roi_index_header(list(values), path)  # rejects a former index key name
-                _add_custom_metric_column(
-                    payload,
-                    name=values.get("label", name),
-                    values=values["values"],
-                    source=values.get("source", str(path)),
-                    n_rois=n_rois,
-                    suite2p_indices=suite2p_indices,
-                    roi_index_values=values.get("roi_index"),
-                )
-            elif isinstance(values, list):
-                _add_custom_metric_column(
-                    payload,
-                    name=name,
-                    values=values,
-                    source=str(path),
-                    n_rois=n_rois,
-                    suite2p_indices=suite2p_indices,
-                )
-        return payload
-    if isinstance(raw, list) and raw and isinstance(raw[0], dict):
-        headers = sorted({key for row in raw for key in row})
-        index_header = _roi_index_header(headers, path)
-        roi_index_values = [row.get(index_header) for row in raw] if index_header else None
-        for header in headers:
-            if header == index_header:
-                continue
-            values = [row.get(header) for row in raw]
-            if not any(_jsonable_metric_value(value) is not None for value in values):
-                continue
-            _add_custom_metric_column(
-                payload,
-                name=header,
-                values=values,
-                source=str(path),
-                n_rois=n_rois,
-                suite2p_indices=suite2p_indices,
-                roi_index_values=roi_index_values,
-            )
-    return payload
-
-
-def _load_custom_metric_numpy(path: Path, n_rois: int, suite2p_indices: np.ndarray) -> dict[str, Any]:
-    payload = _empty_custom_metrics(n_rois)
-    payload["sources"].append(str(path))
-    if path.suffix.lower() == ".npz":
-        with np.load(path, allow_pickle=False) as arrays:
-            for name in arrays.files:
-                array = np.asarray(arrays[name])
-                if array.ndim == 1:
-                    _add_custom_metric_column(
-                        payload,
-                        name=name,
-                        values=array,
-                        source=str(path),
-                        n_rois=n_rois,
-                        suite2p_indices=suite2p_indices,
-                    )
-                elif array.ndim == 2 and array.shape[0] == n_rois:
-                    for col in range(array.shape[1]):
-                        _add_custom_metric_column(
-                            payload,
-                            name=f"{name}_{col}",
-                            values=array[:, col],
-                            source=str(path),
-                            n_rois=n_rois,
-                            suite2p_indices=suite2p_indices,
-                        )
-        return payload
-    array = np.load(path, allow_pickle=False)
-    if array.ndim == 1:
-        _add_custom_metric_column(
-            payload,
-            name=path.stem,
-            values=array,
-            source=str(path),
-            n_rois=n_rois,
-            suite2p_indices=suite2p_indices,
-        )
-    elif array.ndim == 2 and array.shape[0] == n_rois:
-        for col in range(array.shape[1]):
-            _add_custom_metric_column(
-                payload,
-                name=f"{path.stem}_{col}",
-                values=array[:, col],
-                source=str(path),
-                n_rois=n_rois,
-                suite2p_indices=suite2p_indices,
-            )
-    else:
-        raise ValueError(f"Custom metric array {path} must have shape ({n_rois},) or ({n_rois}, n_metrics).")
     return payload
 
 
@@ -1124,14 +1031,13 @@ def _load_custom_roi_metrics(
         if not path.exists():
             raise FileNotFoundError(f"Custom ROI metric file not found: {path}")
         suffix = path.suffix.lower()
-        if suffix in {".csv", ".tsv"}:
+        if suffix in {".csv", ".tsv", ".txt"}:
             payloads.append(_load_custom_metric_table(path, n_rois, suite2p_indices))
-        elif suffix == ".json":
-            payloads.append(_load_custom_metric_json(path, n_rois, suite2p_indices))
-        elif suffix in {".npy", ".npz"}:
-            payloads.append(_load_custom_metric_numpy(path, n_rois, suite2p_indices))
         else:
-            raise ValueError(f"Unsupported custom ROI metric file extension: {path.suffix}")
+            raise ValueError(
+                f"Unsupported custom ROI metric file {path.name}: use a comma- or tab-separated "
+                ".csv, .tsv or .txt file with a header row and one row per ROI."
+            )
     return _merge_custom_metric_payloads(payloads, n_rois)
 
 
@@ -2237,6 +2143,10 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .load-info-icon:hover, .load-info-icon[aria-expanded="true"] {{ border-color: #175cd3; color: #175cd3; }}
 .load-info-icon.warn {{ border-color: #dc6803; color: #b54708; background: #fffaeb; }}
 .load-info-rule {{ margin: 6px 0 0; color: #475467; }}
+.format-spec {{ border-collapse: collapse; margin: 4px 0 8px; font-size: 12px; width: 100%; }}
+.format-spec th {{ text-align: left; padding: 6px 6px 2px 0; color: #101828; font-weight: 600; }}
+.format-spec td {{ padding: 2px 8px 2px 0; vertical-align: top; color: #344054; border-top: 1px solid #eaecf0; }}
+.format-spec td:nth-child(2) {{ white-space: nowrap; color: #475467; }}
 .load-info-rule code {{ font-size: 11px; }}
 .load-info-pop {{ position: absolute; top: 32px; right: 8px; max-width: min(460px, calc(100% - 16px)); padding: 8px 10px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 12px; line-height: 1.4; color: #344054; z-index: 4; }}
 .viewer-column {{ display: grid; grid-template-columns: auto 12px minmax(0, 1fr); grid-template-areas: "fov split side" "trace trace trace"; column-gap: 0; row-gap: 8px; align-items: start; }}
@@ -2523,11 +2433,6 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 0,1,inhibitory
 1,-1,excitatory
 2,1,inhibitory</pre>
-        <p class="info-example-label">JSON (cell_identity_labels.json)</p>
-        <pre class="info-example">[
-  {{"roi_index": 0, "cell_identity_code": 1, "cell_identity_label": "inhibitory"}},
-  {{"roi_index": 1, "cell_identity_code": -1, "cell_identity_label": "excitatory"}}
-]</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#cell-identity-labels" target="_blank" rel="noopener noreferrer">Cell identity labels and the roi_index column</a></p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
@@ -2559,10 +2464,6 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
-        <p class="info-example-label">NumPy, command line only</p>
-        <pre class="info-example">import numpy as np
-# command line only (--custom-roi-metrics): one value per ROI, in original-index order
-np.savez("qc_metrics.npz", roi_area_px=areas, snr=snr)</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploaded-roi-metrics" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
       </div>
       <div class="filter-controls">
@@ -2673,7 +2574,7 @@ np.savez("qc_metrics.npz", roi_area_px=areas, snr=snr)</pre>
       <button class="info-button" type="button" data-info-target="sortMetricSources" aria-expanded="false">Read more: metric sources</button>
     </div>
     <div id="sortMetricSources" class="info-box" hidden>
-      <p>These are the same metrics as in the Filter menu, with the same definitions and sources. Cell identity code sorts by the integer code, which in legacy cell-type files is <code>-1</code> excitatory/non-red, <code>0</code> unsure and <code>1</code> inhibitory/red.</p>
+      <p>These are the same metrics as in the Filter menu, with the same definitions and sources. Cell identity code sorts by the integer code, which in legacy cell-type files is <code>-1</code> excitatory, <code>0</code> unsure and <code>1</code> inhibitory.</p>
       <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#sort-metrics" target="_blank" rel="noopener noreferrer">Sort metrics and their sources</a></p>
     </div>
     <div class="trace-sort">
@@ -2812,11 +2713,20 @@ np.savez("qc_metrics.npz", roi_area_px=areas, snr=snr)</pre>
         <label><input type="radio" name="customUploadKind" value="numeric" checked> QC metric</label>
         <label><input type="radio" name="customUploadKind" value="categorical"> Cell identity label</label>
       </div>
-      <input id="customRoiUploadFile" type="file" accept=".csv,.tsv,.txt,.json">
+      <input id="customRoiUploadFile" type="file" accept=".csv,.tsv,.txt">
       <button id="applyCustomRoiUpload" type="button">Load selected file</button>
       <div id="customRoiUploadStatus" class="note"></div>
       <div class="info-box">
-        <p>QC metric files add your own numeric per-ROI values, and cell identity files add an integer code, a name or both per ROI; both accept CSV, TSV, TXT and JSON. <code>roi_index</code> is the ROI's 0-based original index, and without it row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</p>
+        <p>Files are comma- or tab-separated (<code>.csv</code>, <code>.tsv</code>, or <code>.txt</code> in either layout) with a header row and one row per ROI. Columns:</p>
+        <table class="format-spec">
+          <tr><th colspan="3">QC metric file</th></tr>
+          <tr><td><code>roi_index</code></td><td>optional</td><td>The ROI&apos;s 0-based original index. Without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</td></tr>
+          <tr><td>any other column</td><td>at least one</td><td>One numeric metric per column, named by its header. Blank or non-numeric cells are missing values.</td></tr>
+          <tr><th colspan="3">Cell type/compartment (cell identity) file</th></tr>
+          <tr><td><code>roi_index</code></td><td>optional</td><td>As above.</td></tr>
+          <tr><td><code>cell_identity_code</code></td><td>this, the label, or both</td><td>Integer code for the ROI&apos;s cell type or compartment.</td></tr>
+          <tr><td><code>cell_identity_label</code></td><td>this, the code, or both</td><td>Name of the cell type or compartment. With a code, it names that code; on its own, codes are assigned automatically. Rename values afterwards below.</td></tr>
+        </table>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
         <pre class="info-example">roi_index,roi_area_px,snr
 0,112,4.2
@@ -2831,8 +2741,8 @@ np.savez("qc_metrics.npz", roi_area_px=areas, snr=snr)</pre>
       </div>
     </div>
     <div class="dialog-section" id="categoryLabelEditorSection" hidden>
-      <div class="dialog-section-title">Cell identity labels</div>
-      <div class="note">Edit the name for each unique cell identity value. These labels are used in the filter menu, sort readouts, and spreadsheet export.</div>
+      <div class="dialog-section-title">Cell type/compartment labels</div>
+      <div class="note">Edit the name for each unique cell type/compartment value. These labels are used in the filter menu, sort readouts, and spreadsheet export.</div>
       <div id="categoryLabelEditor" class="category-label-editor"></div>
     </div>
     <div class="dialog-actions">
@@ -3047,7 +2957,7 @@ if (!Array.isArray(data.customRoiMetrics.values) || data.customRoiMetrics.values
   data.customRoiMetrics.values = Array.from({{length: data.nRois}}, (_, roi) => data.customRoiMetrics.values?.[roi] || {{}});
 }}
 if (!Array.isArray(data.customRoiMetrics.sources)) data.customRoiMetrics.sources = [];
-data.categoryLabelMap = data.categoryLabelMap || {{"1": "inhibitory/red", "-1": "excitatory/non-red", "0": "unsure"}};
+data.categoryLabelMap = data.categoryLabelMap || {{"1": "inhibitory", "-1": "excitatory", "0": "unsure"}};
 const ROI_INDEX_LABEL = data.roiIndexLabel || "Suite2p Original Index";
 const ROI_INDEX_LABEL_LOWER = ROI_INDEX_LABEL.toLowerCase();
 document.querySelectorAll(".roi-index-label").forEach(el => {{ el.textContent = ROI_INDEX_LABEL; }});
@@ -3405,7 +3315,8 @@ function renderCategoryLabelEditor() {{
   }}
 }}
 function parseDelimitedRows(text) {{
-  const delimiter = text.includes("\\t") && !text.includes(",") ? "\\t" : ",";
+  const firstLine = text.split(/\\r?\\n/, 1)[0] || "";
+  const delimiter = firstLine.includes("\\t") ? "\\t" : ",";  // tab-separated if the header has a tab
   const rows = [];
   let row = [], field = "", quoted = false;
   for (let i = 0; i < text.length; i++) {{
@@ -3428,8 +3339,9 @@ function parseDelimitedRows(text) {{
   return rows;
 }}
 function parseCellTypeCode(code, label) {{
-  const numeric = Number(String(code ?? "").trim());
-  if (Number.isFinite(numeric)) return numeric;
+  const codeText = String(code ?? "").trim();
+  const numeric = codeText === "" ? NaN : Number(codeText);
+  if (Number.isInteger(numeric)) return numeric;
   const text = String(label ?? code ?? "").trim().toLowerCase();
   if (["inhibitory", "inhibitory/red", "red", "inh"].includes(text)) return 1;
   if (["excitatory", "excitatory/non-red", "non-red", "nonred", "exc"].includes(text)) return -1;
@@ -3453,6 +3365,7 @@ function ensureUniqueCustomMetricKey(baseKey) {{
   return key;
 }}
 function normalizeCustomMetricValue(value) {{
+  if (value === null || value === undefined || String(value).trim() === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }}
@@ -3497,35 +3410,12 @@ function loadCustomMetricRows(rows, sourceName) {{
     addCustomMetricDefinition(headers[col], values, sourceName, roiIndexValues);
   }}
 }}
-function loadCustomMetricJson(text, sourceName) {{
-  const raw = JSON.parse(text);
-  const metrics = raw && raw.metrics ? raw.metrics : raw;
-  if (Array.isArray(metrics)) {{
-    if (!metrics.length || typeof metrics[0] !== "object") throw new Error("JSON row list must contain objects.");
-    const headers = Array.from(new Set(metrics.flatMap(row => Object.keys(row))));
-    const indexPosition = roiIndexColumn(headers);
-    const indexHeader = indexPosition >= 0 ? headers[indexPosition] : null;
-    const roiIndexValues = indexHeader ? metrics.map(row => row[indexHeader]) : null;
-    for (const header of headers) {{
-      if (header === indexHeader) continue;
-      const values = metrics.map(row => row[header]);
-      if (!values.some(value => normalizeCustomMetricValue(value) !== null)) continue;
-      addCustomMetricDefinition(header, values, sourceName, roiIndexValues);
-    }}
-    return;
-  }}
-  if (!metrics || typeof metrics !== "object") throw new Error("JSON custom metrics must be an object or row list.");
-  for (const [name, values] of Object.entries(metrics)) {{
-    if (Array.isArray(values)) addCustomMetricDefinition(name, values, sourceName);
-    else if (values && typeof values === "object" && Array.isArray(values.values)) {{
-      roiIndexColumn(Object.keys(values));
-      addCustomMetricDefinition(values.label || name, values.values, values.source || sourceName, values.roi_index || null);
-    }}
-  }}
+function rejectUnsupportedTable(sourceName) {{
+  if (!/\.(csv|tsv|txt)$/i.test(sourceName)) throw new Error("use a comma- or tab-separated .csv, .tsv or .txt file with a header row and one row per ROI.");
 }}
 function loadCustomMetricText(text, sourceName) {{
-  if (sourceName.toLowerCase().endsWith(".json")) loadCustomMetricJson(text, sourceName);
-  else loadCustomMetricRows(parseDelimitedRows(text), sourceName);
+  rejectUnsupportedTable(sourceName);
+  loadCustomMetricRows(parseDelimitedRows(text), sourceName);
   renderCustomMetricControls();
   renderCustomSortMetrics();
   updateMetricDefaults();
@@ -3547,59 +3437,8 @@ function categoryCodeFromLabel(label, labelToCode) {{
   }}
   return labelToCode.get(key);
 }}
-function loadCategoryRows(rowObjects, sourceName) {{
-  if (!Array.isArray(rowObjects) || !rowObjects.length || typeof rowObjects[0] !== "object") {{
-    throw new Error("JSON cell identity labels must be a list of row objects.");
-  }}
-  const headers = Array.from(new Set(rowObjects.flatMap(row => Object.keys(row))));
-  const lowerHeaders = headers.map(value => value.toLowerCase());
-  let codeHeader = null;
-  for (const name of ["cell_identity_code", "category_code", "cell_type_code", "code"]) {{
-    const found = lowerHeaders.indexOf(name);
-    if (found >= 0) {{ codeHeader = headers[found]; break; }}
-  }}
-  let labelHeader = null;
-  for (const name of ["cell_identity_label", "category_label", "cell_type_label", "label"]) {{
-    const found = lowerHeaders.indexOf(name);
-    if (found >= 0) {{ labelHeader = headers[found]; break; }}
-  }}
-  const indexPosition = roiIndexColumn(headers);
-  const indexHeader = indexPosition >= 0 ? headers[indexPosition] : null;
-  if (!codeHeader && !labelHeader) throw new Error("Expected cell_identity_code/cell_identity_label keys (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
-  const nextLabels = new Array(data.nRois).fill(null);
-  const labelMap = {{}};
-  const labelToCode = new Map();
-  const roiBySuite2p = new Map(data.suite2pIndices.map((value, roi) => [Number(value), roi]));
-  const parseObjectCode = (row) => {{
-    let code = codeHeader ? parseCellTypeCode(row[codeHeader], labelHeader ? row[labelHeader] : "") : null;
-    if (code === null && labelHeader) code = categoryCodeFromLabel(row[labelHeader], labelToCode);
-    if (code !== null && labelHeader && String(row[labelHeader] ?? "").trim()) labelMap[String(code)] = String(row[labelHeader]).trim();
-    return code;
-  }};
-  if (indexHeader) {{
-    for (const row of rowObjects) {{
-      const roi = roiBySuite2p.get(Number(row[indexHeader]));
-      if (roi === undefined) continue;
-      nextLabels[roi] = parseObjectCode(row);
-    }}
-  }} else {{
-    if (rowObjects.length !== data.nRois) throw new Error(`Expected ${{data.nRois}} data rows, found ${{rowObjects.length}}.`);
-    rowObjects.forEach((row, roi) => {{ nextLabels[roi] = parseObjectCode(row); }});
-  }}
-  data.cellTypeLabels = nextLabels;
-  data.categoryLabelMap = {{...data.categoryLabelMap, ...labelMap}};
-  data.cellTypeLabelSource = sourceName;
-  renderCategoryLabelEditor();
-}}
 function loadCellTypeTableText(text, sourceName) {{
-  if (sourceName.toLowerCase().endsWith(".json")) {{
-    loadCategoryRows(JSON.parse(text), sourceName);
-    updateCellTypeLabelStatus();
-    evaluateFilter();
-    updateSortCurrent();
-    draw();
-    return;
-  }}
+  rejectUnsupportedTable(sourceName);
   const rows = parseDelimitedRows(text);
   if (rows.length < 2) throw new Error("Expected a header row and one row per ROI.");
   const headers = rows[0].map(value => value.trim().toLowerCase());
@@ -3610,7 +3449,7 @@ function loadCellTypeTableText(text, sourceName) {{
   if (labelIndex < 0) labelIndex = headers.indexOf("category_label");
   if (labelIndex < 0) labelIndex = headers.indexOf("cell_type_label");
   const suite2pIndex = roiIndexColumn(headers);
-  if (codeIndex < 0 && labelIndex < 0) throw new Error("Expected cell_identity_code/cell_identity_label columns (or category_code/category_label, or legacy cell_type_code/cell_type_label).");
+  if (codeIndex < 0 && labelIndex < 0) throw new Error("The file needs a cell_identity_code column, a cell_identity_label column, or both.");
   const nextLabels = new Array(data.nRois).fill(null);
   const labelMap = {{}};
   const labelToCode = new Map();
@@ -4544,8 +4383,8 @@ function cellTypeLabelName(label) {{
   if (!Number.isFinite(numeric)) return "not loaded";
   const mapped = data.categoryLabelMap?.[String(numeric)];
   if (mapped) return mapped;
-  if (numeric === 1) return "inhibitory/red";
-  if (numeric === -1) return "excitatory/non-red";
+  if (numeric === 1) return "inhibitory";
+  if (numeric === -1) return "excitatory";
   if (numeric === 0) return "unsure";
   return `cell identity ${{numeric}}`;
 }}
@@ -6018,7 +5857,7 @@ document.getElementById("applyCustomRoiUpload").addEventListener("click", () => 
   const file = customRoiUploadFileInput.files && customRoiUploadFileInput.files[0];
   const status = document.getElementById("customRoiUploadStatus");
   if (!file) {{
-    status.textContent = "Choose a CSV, TSV, TXT, or JSON file first.";
+    status.textContent = "Choose a .csv, .tsv or .txt file first.";
     return;
   }}
   const kind = document.querySelector('input[name="customUploadKind"]:checked')?.value || "numeric";
@@ -7049,10 +6888,10 @@ def main() -> None:
         default=[],
         help=(
             "Path to ROI-level custom metrics to embed in the reviewer. Can be repeated. "
-            "Supported formats: CSV/TSV/JSON with one numeric value per ROI per metric, "
-            "or NPY/NPZ arrays shaped (n_rois,) or (n_rois, n_metrics). CSV/TSV/JSON may "
-            "include a roi_index column (the 0-based original ROI index) to map rows to ROIs; "
-            "otherwise row k is ROI k."
+            "A comma- or tab-separated .csv, .tsv or .txt file with a header row; each "
+            "column other than roi_index is one numeric metric. roi_index (optional) is the "
+            "0-based original ROI index; without it row k is ROI k and the file must have "
+            "exactly one row per ROI. Blank or non-numeric cells are missing values."
         ),
     )
     parser.add_argument(
