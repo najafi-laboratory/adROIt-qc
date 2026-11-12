@@ -2555,14 +2555,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div id="customMetricSources" class="info-box" hidden>
         <p>Uploaded ROI metrics are your own per-ROI values, given with <code>--custom-roi-metrics</code> at generation or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Each column other than <code>roi_index</code> becomes a metric, and its <strong>Section</strong> menu moves it to any section of this menu and the Sort menu.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
-        <pre class="info-example">roi_index,roi_size,snr
+        <pre class="info-example">roi_index,roi_area_px,snr
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
         <p class="info-example-label">NumPy, command line only</p>
         <pre class="info-example">import numpy as np
 # command line only (--custom-roi-metrics): one value per ROI, in original-index order
-np.savez("qc_metrics.npz", roi_size=sizes, snr=snr)</pre>
+np.savez("qc_metrics.npz", roi_area_px=areas, snr=snr)</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploaded-roi-metrics" target="_blank" rel="noopener noreferrer">Uploaded metrics and their sections</a></p>
       </div>
       <div class="filter-controls">
@@ -2818,7 +2818,7 @@ np.savez("qc_metrics.npz", roi_size=sizes, snr=snr)</pre>
       <div class="info-box">
         <p>QC metric files add your own numeric per-ROI values, and cell identity files add an integer code, a name or both per ROI; both accept CSV, TSV, TXT and JSON. <code>roi_index</code> is the ROI's 0-based original index, and without it row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</p>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
-        <pre class="info-example">roi_index,roi_size,snr
+        <pre class="info-example">roi_index,roi_area_px,snr
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
