@@ -2559,16 +2559,6 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
-        <p class="info-example-label">JSON, one array per metric (qc_metrics.json)</p>
-        <pre class="info-example">{{
-  "roi_size": [112, 86, 140],
-  "snr": [4.2, 1.8, 3.1]
-}}</pre>
-        <p class="info-example-label">JSON, one object per ROI</p>
-        <pre class="info-example">[
-  {{"roi_index": 0, "roi_size": 112, "snr": 4.2}},
-  {{"roi_index": 1, "roi_size": 86, "snr": 1.8}}
-]</pre>
         <p class="info-example-label">NumPy, command line only</p>
         <pre class="info-example">import numpy as np
 # command line only (--custom-roi-metrics): one value per ROI, in original-index order
@@ -2832,11 +2822,6 @@ np.savez("qc_metrics.npz", roi_size=sizes, snr=snr)</pre>
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
-        <p class="info-example-label">JSON, one array per metric</p>
-        <pre class="info-example">{{
-  "roi_size": [112, 86, 140],
-  "snr": [4.2, 1.8, 3.1]
-}}</pre>
         <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
         <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
 0,1,inhibitory
