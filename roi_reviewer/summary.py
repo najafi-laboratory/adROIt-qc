@@ -2419,18 +2419,18 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .summary-header {{ display: flex; gap: 8px; align-items: center; justify-content: space-between; height: 28px; margin-bottom: 0; }}
 .summary-header .title {{ margin-bottom: 0; }}
 .summary-section {{ display: flex; flex-direction: column; min-height: 0; }}
-.summary-grid {{ flex: 1 1 0; min-height: 0; min-width: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; align-items: stretch; }}
-.summary-fraction {{ flex: none; align-self: start; }}
-.summary-right {{ display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; }}
+.summary-grid {{ flex: 1 1 0; min-height: 0; min-width: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); grid-template-rows: minmax(0, min(43%, 196px)) minmax(0, 1fr); grid-template-areas: "bars rate" "trans trans"; gap: 6px 8px; align-items: stretch; }}
+.summary-fraction {{ grid-area: bars; min-height: 0; }}
 .head-actions {{ display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }}
 .head-actions .info-button {{ font-size: 11px; padding: 1px 6px; white-space: nowrap; }}
-.summary-fraction .canvas-box {{ flex: none; width: 130px; height: 150px; }}
-.summary-rate {{ flex: 1 1 0; }}
-.summary-transient {{ flex: 1.3 1 0; }}
+.summary-fraction .canvas-box {{ flex: 1 1 0; width: 130px; min-height: 0; }}
+.summary-rate .canvas-box {{ min-height: 0; }}
+.summary-rate {{ grid-area: rate; min-width: 0; }}
+.summary-transient {{ grid-area: trans; min-width: 0; }}
 .transient-box > canvas[hidden] {{ display: none; }}
 .canvas-box {{ position: relative; flex: 1 1 0; min-height: 60px; }}
 .canvas-box > canvas {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
-.gbu-plot-head {{ display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; justify-content: space-between; margin: 2px 0 3px; min-width: 0; }}
+.gbu-plot-head {{ display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; justify-content: space-between; margin: 2px 0 3px; min-width: 0; min-height: 21px; }}
 .gbu-plot-title {{ white-space: nowrap; }}
 .gbu-plot-head .gbu-plot-title {{ margin: 0; }}
 .gbu-subtitle {{ font-size: 11px; color: #475467; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
@@ -2876,10 +2876,9 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
             <div class="note" id="gbuSummaryNote"></div>
             <div class="summary-grid">
               <div class="summary-section summary-fraction">
-                <div class="gbu-plot-title">ROIs by label</div>
+                <div class="gbu-plot-head"><div class="gbu-plot-title">ROIs by label</div></div>
                 <div class="canvas-box"><canvas id="gbuFractionCanvas"></canvas></div>
               </div>
-              <div class="summary-right">
                 <div class="summary-section summary-rate">
                   <div class="gbu-plot-head">
                     <div class="gbu-plot-title" id="gbuRateTitle">Firing rate</div>
@@ -2905,7 +2904,6 @@ np.savez("qc_metrics.npz", local_contrast=contrast, tdtomato_intensity=intensity
                     <canvas id="oasisTransientCanvas" hidden></canvas>
                   </div>
                 </div>
-              </div>
             </div>
           </div>
           <button class="summary-show-tab" id="summaryShow" type="button">Show summary by QC label</button>
