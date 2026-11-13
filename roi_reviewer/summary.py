@@ -2215,10 +2215,10 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .sort-header {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
 .sort-current {{ color: #667085; font-size: 14px; }}
 .trace-header-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }}
-.trace-header-controls {{ display: none; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; font-size: 14px; }}
+.trace-header-controls {{ display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; font-size: 14px; }}
 .trace-summary-toggle {{ flex: 0 0 auto; white-space: nowrap; margin-left: auto; font-size: 14px; }}
 .info-box .info-source {{ color: #475569; font-size: 13px; }}
-.trace-header-controls.visible {{ display: flex; }}
+.trace-header-controls:not(.visible) .spike-only {{ display: none; }}
 .trace-header-controls button {{ flex: 0 0 auto; white-space: nowrap; }}
 .filter-controls {{ display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; align-items: end; }}
 .filter-controls label {{ font-size: 14px; color: #475467; }}
@@ -2810,18 +2810,23 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div class="trace-header-row">
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
           <div class="trace-header-controls" id="traceOasisControls">
-            <label class="oasis-toggle"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
-            <label>Amplitude threshold</label>
-            <div class="oasis-threshold-row">
+            <label class="oasis-toggle spike-only"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
+            <label class="spike-only">Amplitude threshold</label>
+            <div class="oasis-threshold-row spike-only">
               <input id="oasisThresholdSlider" type="range" min="0" max="1" step="0.001" value="0.05">
               <input id="oasisThreshold" type="number" min="0" step="0.001" value="0.05">
             </div>
-            <button id="resetOasisThreshold" type="button">Reset to ROI default</button>
+            <button id="resetOasisThreshold" type="button" class="spike-only">Reset to ROI default</button>
+            <button id="loadDffFile" type="button" title="Choose an ROI x frame float32 .npy file">Load dF/F</button>
+            <button id="loadOasisFile" type="button" title="Choose an ROI x frame float32 .npy file">Load inferred spikes</button>
             <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
           </div>
         </div>
         
-        <div class="trace-loader" id="traceLoader" hidden></div>
+        <div class="trace-loader" id="traceLoader" hidden>
+          <input id="dffFile" type="file" accept=".npy">
+          <input id="oasisFile" type="file" accept=".npy">
+        </div>
         <div id="traceHelp" class="info-box" hidden>
           <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
@@ -2836,7 +2841,7 @@ np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float3
         </div>
         <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
           <div id="traceLoadStatus"></div>
-          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address).</p>
+          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
           <p class="load-info-rule" id="traceLoadSession"></p>
         </div>
         <canvas id="traceCanvas"></canvas>
@@ -3092,7 +3097,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
 // Sidecars load by fetch() relative to this page, which browsers allow over http(s) but not
 // for a page opened from disk (file://). The notes below say which case applies.
 const openedFromDisk = window.location.protocol === "file:";
-const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Open this page through a web server (an http:// or https:// address, for example python -m http.server run in this folder) to load them automatically.";
+const SIDECAR_DISK_ADVICE = "This page was opened from disk (file://), and browsers do not let a page opened that way read files beside it. Open this page through a web server (an http:// or https:// address, for example python -m http.server run in this folder) to load them automatically, or choose the files with Load dF/F and Load inferred spikes.";
 function setLoadInfoState(missing) {{
   const button = document.getElementById("traceLoadInfo");
   if (button) button.classList.toggle("warn", !!missing);
@@ -6236,6 +6241,28 @@ document.querySelectorAll("[data-transient-mode]").forEach(button => {{
     scheduleGbuSummaryDraw();
   }});
 }});
+const dffFileInput = document.getElementById("dffFile");
+const oasisFileInput = document.getElementById("oasisFile");
+function loadTraceFile(input, setter, label) {{
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {{
+    try {{
+      setter(reader.result);
+    }} catch (error) {{
+      document.getElementById("traceLoadStatus").textContent = `Could not load ${{label}} file: ${{error.message}}`;
+      toggleLoadInfo(true);
+    }}
+    setLoadInfoState(!dff || (data.oasisAvailable && !oasisSpikes));
+    input.value = "";
+  }};
+  reader.readAsArrayBuffer(file);
+}}
+document.getElementById("loadDffFile").addEventListener("click", () => dffFileInput.click());
+document.getElementById("loadOasisFile").addEventListener("click", () => oasisFileInput.click());
+dffFileInput.addEventListener("change", () => loadTraceFile(dffFileInput, setDffFromArrayBuffer, "dF/F"));
+oasisFileInput.addEventListener("change", () => loadTraceFile(oasisFileInput, setOasisFromArrayBuffer, "inferred spikes"));
 bindFovResizer(document.getElementById("fovSplitter"), "x");
 bindFovResizer(document.getElementById("fovResizeIcon"), "corner");
 layoutFovRow();
