@@ -32,7 +32,7 @@ KNOWN_KEYS = {
     "name", "notes", "session_path", "output_dir", "input_layout",
     "roi_index_label", "filter_set", "target_structure", "initialize_labels_from_model_scores",
     "custom_roi_metrics", "pdf_name", "html_name", "archive_output", "archive_name",
-    "custom_roi_metric_sections", "filter_settings", "html_only",
+    "custom_roi_metric_sections", "filter_settings", "html_only", "title",
 }
 METRIC_SECTIONS = {"uploaded", "model_derived", "morphology", "fluorescence", "inferred_spike"}
 FILTER_SETS = {"all_rois", "soma", "dendrite", "dendrite_relaxed"}
@@ -105,6 +105,8 @@ def build_command(cfg: dict, session: Path, output_dir: Path) -> list[str]:
         cmd += ["--filter-settings", str(resolve(cfg["filter_settings"]))]
     if cfg.get("html_only"):
         cmd += ["--html-only"]
+    if cfg.get("title"):
+        cmd += ["--title", str(cfg["title"])]
     if cfg.get("pdf_name"):
         cmd += ["--pdf-name", cfg["pdf_name"]]
     if cfg.get("html_name"):

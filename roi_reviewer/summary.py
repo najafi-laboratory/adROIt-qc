@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+from html import escape as _escape_html
 import base64
 import csv
 import io
@@ -1925,6 +1926,7 @@ def _rebuild_reviewer_html(
     custom_roi_metrics: list[str | os.PathLike[str]] | None,
     custom_roi_metric_sections: list[str] | None,
     filter_settings: dict[str, Any] | None,
+    title: str | None = None,
 ) -> None:
     """--html-only: rebuild an existing reviewer from its own embedded data and the current template."""
 
@@ -1945,6 +1947,19 @@ def _rebuild_reviewer_html(
     _assign_custom_metric_sections(payload.get("customRoiMetrics") or {}, custom_roi_metric_sections)
     if filter_settings is not None:
         _apply_filter_settings(payload, filter_settings)
+    if title:
+        payload["title"] = title
+    # Reviewers built before the inferred-spike sidecar was renamed point at SESSION_oasis_spikes.npy;
+    # rename that file to SESSION_inferred_spikes.npy and point the rebuilt page at it.
+    old_spikes = payload.get("oasisSidecarName")
+    if payload.get("oasisStorageMode") == "file" and old_spikes and old_spikes.endswith("_oasis_spikes.npy"):
+        new_spikes = old_spikes[: -len("_oasis_spikes.npy")] + "_inferred_spikes.npy"
+        old_path, new_path = html_path.parent / old_spikes, html_path.parent / new_spikes
+        if old_path.exists() and not new_path.exists():
+            old_path.rename(new_path)
+            print(f"Renamed {old_spikes} to {new_spikes}.")
+        if new_path.exists():
+            payload["oasisSidecarName"] = new_spikes
     for mode_key, name_key in (("dffStorageMode", "dffSidecarName"), ("oasisStorageMode", "oasisSidecarName")):
         sidecar = payload.get(name_key)
         if payload.get(mode_key) == "file" and sidecar and not (html_path.parent / sidecar).exists():
@@ -1957,6 +1972,7 @@ def _write_html(
     *,
     input_layout_name: str = "suite2p",
     session_name: str,
+    title: str | None = None,
     mean_green: np.ndarray,
     mean_red: np.ndarray | None,
     cellpose_mask: np.ndarray | None,
@@ -2065,6 +2081,7 @@ def _write_html(
         "oasisEventThreshold": float(oasis_attrs.get("event_threshold", 0.05)),
         "oasisAttrs": oasis_attrs,
         "inputLayout": input_layout_name,
+        "title": title,
     }
     if filter_settings is not None:
         _apply_filter_settings(payload, filter_settings)
@@ -2080,6 +2097,7 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
     """
 
     session_name = str(payload["session"])
+    page_title = _escape_html(str(payload.get("title") or session_name))  # default: the session name
     n_rois = int(payload["nRois"])
     red_available = bool(payload.get("redAvailable"))
     fov_grid_class = "with-red" if red_available else "single-channel"
@@ -2124,7 +2142,7 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{session_name} preprocessing QC</title>
+<title>{page_title}</title>
 <style>
 html, body {{ overflow-y: auto; }}
 body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; color: #202124; background: #f6f7f8; }}
@@ -2397,7 +2415,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 </head>
 <body>
 <div class="page">
-  <div class="head"><h1>{session_name} preprocessing QC</h1></div>
+  <div class="head"><h1>{page_title}</h1></div>
   <dialog id="morphologyDialog">
     <div class="dialog-header">
       <div class="dialog-title">ROI Metric Filters</div>
@@ -2835,20 +2853,20 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <input id="oasisFile" type="file" accept=".npy">
         </div>
         <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold, set as an absolute amplitude or as <em>k</em> SD above the mean of the selected ROI&apos;s non-zero values, are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside it.</p>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold, set as an absolute amplitude or as <em>k</em> SD above the mean of the selected ROI&apos;s non-zero values, are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
 # one row per ROI in original-index order, one column per frame
 np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))            # (n_rois, n_frames)
-np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape</pre>
+np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape</pre>
           <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-threshold" target="_blank" rel="noopener noreferrer">Inferred spikes and the threshold</a> &middot; <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#loading-dff-and-inferred-spike-files" target="_blank" rel="noopener noreferrer">Loading dF/F and inferred spike files</a></p>
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
           <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
         </div>
         <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
           <div id="traceLoadStatus"></div>
-          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_oasis_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
+          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
           <p class="load-info-rule" id="traceLoadSession"></p>
         </div>
         <canvas id="traceCanvas"></canvas>
@@ -3165,7 +3183,7 @@ function updateSidecarLoadNote() {{
       || (data.oasisAvailable && data.oasisStorageMode === "file" && !oasisSpikes);
     const advice = !missing ? ""
       : openedFromDisk ? ` ${{SIDECAR_DISK_ADVICE}}`
-      : ` They were not found beside this page: check that the .npy files are in the same folder as this HTML, named after the session (SESSION_dff.npy and SESSION_oasis_spikes.npy).`;
+      : ` They were not found beside this page: check that the .npy files are in the same folder as this HTML, named after the session (SESSION_dff.npy and SESSION_inferred_spikes.npy).`;
     const text = `${{parts.join("; ")}}.${{advice}}`;
     note.textContent = text.startsWith("dF/F") ? text : text.charAt(0).toUpperCase() + text.slice(1);
     setLoadInfoState(missing);
@@ -6624,6 +6642,7 @@ def create_preprocessing_summary(
     custom_roi_metric_sections: list[str] | None = None,
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
+    title: str | None = None,
 ) -> tuple[Path, Path]:
     input_path = Path(os.path.abspath(os.path.expanduser(os.fspath(session_data_path))))
     session_dir, resolved_layout = _resolve_summary_session_and_layout(input_path, input_layout)
@@ -6641,6 +6660,7 @@ def create_preprocessing_summary(
                 custom_roi_metrics=custom_roi_metrics,
                 custom_roi_metric_sections=custom_roi_metric_sections,
                 filter_settings=loaded_filter_settings,
+                title=title,
             )
             globals()["_LAST_BUILD_WAS_HTML_ONLY"] = True
             return existing_pdf, existing_html
@@ -6743,7 +6763,7 @@ def create_preprocessing_summary(
         )
         oasis_storage_mode = "embedded" if estimated_embedded_dff_bytes <= EMBEDDED_DFF_BYTE_LIMIT else "file"
         if oasis_storage_mode == "file":
-            oasis_sidecar_name = f"{session_dir.name}_oasis_spikes.npy"
+            oasis_sidecar_name = f"{session_dir.name}_inferred_spikes.npy"
             oasis_sidecar_path = out_dir / oasis_sidecar_name
             existing_oasis_sidecar = _load_matching_sidecar(
                 oasis_sidecar_path,
@@ -6793,6 +6813,7 @@ def create_preprocessing_summary(
         html_path,
         input_layout_name=resolved_layout.name,
         session_name=session_dir.name,
+        title=title,
         mean_green=mean_green,
         mean_red=mean_red,
         cellpose_mask=cellpose_mask,
@@ -6845,6 +6866,7 @@ def create_processing_summary(
     custom_roi_metric_sections: list[str] | None = None,
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
+    title: str | None = None,
 ) -> tuple[Path, Path]:
     """Create the processing summary PDF and interactive HTML outputs.
 
@@ -6865,6 +6887,7 @@ def create_processing_summary(
         custom_roi_metric_sections=custom_roi_metric_sections,
         filter_settings=filter_settings,
         html_only=html_only,
+        title=title,
     )
 
 
@@ -7000,6 +7023,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--title",
+        default=None,
+        help="Title shown at the top of the reviewer and in the browser tab (default: the session name).",
+    )
+    parser.add_argument(
         "--html-only",
         action="store_true",
         help=(
@@ -7035,6 +7063,7 @@ def main() -> None:
         custom_roi_metric_sections=args.custom_roi_metric_section,
         filter_settings=args.filter_settings,
         html_only=args.html_only,
+        title=args.title,
     )
     if _LAST_BUILD_WAS_HTML_ONLY:
         print(f"Rebuilt the reviewer from its embedded data; kept the existing PDF and sidecars: {pdf_path.parent}")

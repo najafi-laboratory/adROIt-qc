@@ -46,13 +46,16 @@ filter_set: null
 # is present.
 initialize_labels_from_model_scores: false
 
-# Extra per-ROI numeric metrics to embed, one path or a list. CSV/TSV/JSON with
-# one value per ROI per column (an optional roi_index column, the 0-based
-# original ROI index, maps rows to ROIs), or NPY/NPZ shaped (n_rois,)
-# or (n_rois, n_metrics). They appear under "Uploaded ROI Metrics" in
+# Extra per-ROI numeric metrics to embed, one path or a list. Comma- or
+# tab-separated .csv, .tsv or .txt with a header row and one value per ROI per
+# column (an optional roi_index column, the 0-based original ROI index, maps
+# rows to ROIs). They appear under "Uploaded ROI Metrics" in
 # the filter menu exactly as an in-browser upload would, but are baked in.
 # Relative paths resolve against the repository root.
 custom_roi_metrics: []
+
+# Title at the top of the reviewer and in the browser tab. Default: the session name.
+title: null
 
 # Output filenames. Default: <session>_processing_summary.pdf and
 # <session>_interactive_fov_roi_dff.html.
