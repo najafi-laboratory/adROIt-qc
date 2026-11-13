@@ -267,6 +267,37 @@ def _estimate_embedded_dff_bytes(n_rois: int, n_frames: int) -> int:
     return int(raw_bytes * EMBEDDED_DFF_BASE64_EXPANSION + EMBEDDED_DFF_HTML_OVERHEAD)
 
 
+TRACE_STORAGE_CHOICES = ("auto", "embed", "sidecar")
+
+
+def _embed_limit_bytes(embed_limit_mb: float | None) -> int:
+    if embed_limit_mb is None:
+        return EMBEDDED_DFF_BYTE_LIMIT
+    if not np.isfinite(embed_limit_mb) or embed_limit_mb <= EMBEDDED_DFF_HTML_OVERHEAD / (1024 * 1024):
+        raise ValueError(f"--embed-limit-mb must be larger than {EMBEDDED_DFF_HTML_OVERHEAD // (1024 * 1024)} MB; got {embed_limit_mb}.")
+    return int(embed_limit_mb * 1024 * 1024)
+
+
+def _max_embedded_roi_frames(limit_bytes: int) -> int:
+    return int((limit_bytes - EMBEDDED_DFF_HTML_OVERHEAD) / EMBEDDED_DFF_BASE64_EXPANSION / 4)
+
+
+def _trace_storage_mode(estimated_bytes: int, trace_storage: str, limit_bytes: int) -> str:
+    """'embedded' or 'file' for the dF/F and inferred-spike arrays.
+
+    auto embeds when the encoded estimate fits the limit; embed and sidecar force one mode.
+    """
+    if trace_storage not in TRACE_STORAGE_CHOICES:
+        raise ValueError(f"--trace-storage must be one of {', '.join(TRACE_STORAGE_CHOICES)}; got {trace_storage!r}.")
+    if trace_storage == "embed":
+        if estimated_bytes > 512 * 1024 * 1024:
+            print(f"warning: embedding about {estimated_bytes / 1024**3:.1f} GB per array; browsers may fail to open an HTML file this large.")
+        return "embedded"
+    if trace_storage == "sidecar":
+        return "file"
+    return "embedded" if estimated_bytes <= limit_bytes else "file"
+
+
 def _load_npy(paths: list[Path], allow_pickle: bool = False) -> Any:
     for path in paths:
         if path.exists():
@@ -1918,6 +1949,58 @@ def _apply_filter_settings(payload: dict[str, Any], settings: dict[str, Any]) ->
     payload["filterSettingsSource"] = settings.get("source")
 
 
+def _convert_trace_storage(html_path: Path, payload: dict[str, Any], trace_storage: str, embed_limit_mb: float | None) -> None:
+    """--html-only with --trace-storage / --embed-limit-mb: move the dF/F and inferred-spike arrays
+    between the HTML and .npy sidecars using the data already in the reviewer, without recomputing."""
+
+    limit_bytes = (
+        _embed_limit_bytes(embed_limit_mb)
+        if embed_limit_mb is not None
+        else int(payload.get("embedLimitBytes") or EMBEDDED_DFF_BYTE_LIMIT)
+    )
+    payload["embedLimitBytes"] = limit_bytes
+    if trace_storage == "auto" and embed_limit_mb is None:
+        payload.setdefault("traceStorage", "auto")
+        return  # keep the storage the reviewer was built with
+    n_rois, n_frames = int(payload["nRois"]), int(payload["nFrames"])
+    estimated = _estimate_embedded_dff_bytes(n_rois, n_frames)
+    target = _trace_storage_mode(estimated, trace_storage, limit_bytes)
+    payload["traceStorage"] = trace_storage
+    payload["estimatedEmbeddedDffBytes"] = int(estimated)
+    session = str(payload["session"])
+    arrays = (
+        ("dffStorageMode", "dffSidecarName", "dff", f"{session}_dff.npy", "dF/F"),
+        ("oasisStorageMode", "oasisSidecarName", "oasisSpikes", f"{session}_inferred_spikes.npy", "inferred spikes"),
+    )
+    for mode_key, name_key, data_key, default_name, label in arrays:
+        if data_key == "oasisSpikes" and not payload.get("oasisAvailable"):
+            continue
+        if payload.get(mode_key) == target:
+            continue
+        path = html_path.parent / (payload.get(name_key) or default_name)
+        if target == "embedded":
+            if not path.exists():
+                print(f"warning: cannot embed {label}: {path.name} is not beside {html_path.name}.")
+                continue
+            array = np.load(path, mmap_mode="r")
+            if tuple(array.shape) != (n_rois, n_frames):
+                print(f"warning: cannot embed {label}: {path.name} is {tuple(array.shape)}, expected {(n_rois, n_frames)}.")
+                continue
+            payload[data_key] = _float32_b64(np.asarray(array))
+            payload[mode_key] = "embedded"
+            print(f"Embedded {label} from {path.name} (the .npy file is left in place).")
+        else:
+            encoded = payload.get(data_key)
+            if not encoded:
+                continue
+            array = np.frombuffer(base64.b64decode(encoded), dtype="<f4").reshape(n_rois, n_frames)
+            np.save(path, array)
+            payload[data_key] = None
+            payload[mode_key] = "file"
+            payload[name_key] = path.name
+            print(f"Wrote {label} to {path.name} beside the reviewer.")
+
+
 def _rebuild_reviewer_html(
     html_path: Path,
     *,
@@ -1927,6 +2010,8 @@ def _rebuild_reviewer_html(
     custom_roi_metric_sections: list[str] | None,
     filter_settings: dict[str, Any] | None,
     title: str | None = None,
+    trace_storage: str = "auto",
+    embed_limit_mb: float | None = None,
 ) -> None:
     """--html-only: rebuild an existing reviewer from its own embedded data and the current template."""
 
@@ -1960,6 +2045,7 @@ def _rebuild_reviewer_html(
             print(f"Renamed {old_spikes} to {new_spikes}.")
         if new_path.exists():
             payload["oasisSidecarName"] = new_spikes
+    _convert_trace_storage(html_path, payload, trace_storage, embed_limit_mb)
     for mode_key, name_key in (("dffStorageMode", "dffSidecarName"), ("oasisStorageMode", "oasisSidecarName")):
         sidecar = payload.get(name_key)
         if payload.get(mode_key) == "file" and sidecar and not (html_path.parent / sidecar).exists():
@@ -1973,6 +2059,8 @@ def _write_html(
     input_layout_name: str = "suite2p",
     session_name: str,
     title: str | None = None,
+    trace_storage: str = "auto",
+    embed_limit_bytes: int = EMBEDDED_DFF_BYTE_LIMIT,
     mean_green: np.ndarray,
     mean_red: np.ndarray | None,
     cellpose_mask: np.ndarray | None,
@@ -2082,6 +2170,8 @@ def _write_html(
         "oasisAttrs": oasis_attrs,
         "inputLayout": input_layout_name,
         "title": title,
+        "traceStorage": trace_storage,
+        "embedLimitBytes": int(embed_limit_bytes),
     }
     if filter_settings is not None:
         _apply_filter_settings(payload, filter_settings)
@@ -2098,6 +2188,14 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
 
     session_name = str(payload["session"])
     page_title = _escape_html(str(payload.get("title") or session_name))  # default: the session name
+    embed_limit_bytes = int(payload.get("embedLimitBytes") or EMBEDDED_DFF_BYTE_LIMIT)
+    embed_max_roi_frames = _max_embedded_roi_frames(embed_limit_bytes)
+    embed_limit_mb_text = f"{embed_limit_bytes / (1024 * 1024):g}"
+    trace_storage_policy = str(payload.get("traceStorage") or "auto")
+    trace_storage_note = {
+        "embed": " This reviewer was generated with <code>--trace-storage embed</code>, so its arrays are embedded whatever their size.",
+        "sidecar": " This reviewer was generated with <code>--trace-storage sidecar</code>, so its arrays are separate files whatever their size.",
+    }.get(trace_storage_policy, "")
     n_rois = int(payload["nRois"])
     red_available = bool(payload.get("redAvailable"))
     fov_grid_class = "with-red" if red_available else "single-channel"
@@ -2866,7 +2964,7 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
         </div>
         <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
           <div id="traceLoadStatus"></div>
-          <p class="load-info-rule">Embedded or separate files: the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {EMBEDDED_MAX_ROI_FRAMES:,} (about {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)} MB of encoded data per array). Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
+          <p class="load-info-rule">Embedded or separate files: by default the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {embed_max_roi_frames:,} (about {embed_limit_mb_text} MB of encoded data per array; set with <code>--embed-limit-mb</code>, or force either mode with <code>--trace-storage embed</code> or <code>sidecar</code>).{trace_storage_note} Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
           <p class="load-info-rule" id="traceLoadSession"></p>
         </div>
         <canvas id="traceCanvas"></canvas>
@@ -3244,7 +3342,8 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
   if (sessionLine) {{
     const values = data.nRois * data.nFrames;
     const mode = data.dffStorageMode === "file" ? "separate .npy files" : "embedded in this HTML";
-    sessionLine.textContent = `This session: ${{data.nRois.toLocaleString()}} ROIs × ${{data.nFrames.toLocaleString()}} frames = ${{values.toLocaleString()}}, so its arrays are ${{mode}}.`;
+    const forced = data.traceStorage === "embed" || data.traceStorage === "sidecar";
+    sessionLine.textContent = `This session: ${{data.nRois.toLocaleString()}} ROIs × ${{data.nFrames.toLocaleString()}} frames = ${{values.toLocaleString()}}; its arrays are ${{mode}}${{forced ? ` (--trace-storage ${{data.traceStorage}})` : ""}}.`;
   }}
   const usesSidecars = data.dffStorageMode === "file" || data.oasisStorageMode === "file";
   note.textContent = usesSidecars
@@ -6643,6 +6742,8 @@ def create_preprocessing_summary(
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
     title: str | None = None,
+    trace_storage: str = "auto",
+    embed_limit_mb: float | None = None,
 ) -> tuple[Path, Path]:
     input_path = Path(os.path.abspath(os.path.expanduser(os.fspath(session_data_path))))
     session_dir, resolved_layout = _resolve_summary_session_and_layout(input_path, input_layout)
@@ -6661,6 +6762,8 @@ def create_preprocessing_summary(
                 custom_roi_metric_sections=custom_roi_metric_sections,
                 filter_settings=loaded_filter_settings,
                 title=title,
+                trace_storage=trace_storage,
+                embed_limit_mb=embed_limit_mb,
             )
             globals()["_LAST_BUILD_WAS_HTML_ONLY"] = True
             return existing_pdf, existing_html
@@ -6732,7 +6835,8 @@ def create_preprocessing_summary(
     stat = suite2p_stat[:n_rois]
     suite2p_indices = np.arange(n_rois, dtype=np.int64)
     estimated_embedded_dff_bytes = _estimate_embedded_dff_bytes(n_rois, n_frames)
-    dff_storage_mode = "embedded" if estimated_embedded_dff_bytes <= EMBEDDED_DFF_BYTE_LIMIT else "file"
+    embed_limit_bytes = _embed_limit_bytes(embed_limit_mb)
+    dff_storage_mode = _trace_storage_mode(estimated_embedded_dff_bytes, trace_storage, embed_limit_bytes)
     dff_sidecar_name = None
     dff_sidecar_path = None
     if dff_storage_mode == "file":
@@ -6761,7 +6865,7 @@ def create_preprocessing_summary(
             float(oasis_attrs.get("event_threshold", 0.05)),
             frame_rate,
         )
-        oasis_storage_mode = "embedded" if estimated_embedded_dff_bytes <= EMBEDDED_DFF_BYTE_LIMIT else "file"
+        oasis_storage_mode = dff_storage_mode
         if oasis_storage_mode == "file":
             oasis_sidecar_name = f"{session_dir.name}_inferred_spikes.npy"
             oasis_sidecar_path = out_dir / oasis_sidecar_name
@@ -6814,6 +6918,8 @@ def create_preprocessing_summary(
         input_layout_name=resolved_layout.name,
         session_name=session_dir.name,
         title=title,
+        trace_storage=trace_storage,
+        embed_limit_bytes=embed_limit_bytes,
         mean_green=mean_green,
         mean_red=mean_red,
         cellpose_mask=cellpose_mask,
@@ -6867,6 +6973,8 @@ def create_processing_summary(
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
     title: str | None = None,
+    trace_storage: str = "auto",
+    embed_limit_mb: float | None = None,
 ) -> tuple[Path, Path]:
     """Create the processing summary PDF and interactive HTML outputs.
 
@@ -6888,6 +6996,8 @@ def create_processing_summary(
         filter_settings=filter_settings,
         html_only=html_only,
         title=title,
+        trace_storage=trace_storage,
+        embed_limit_mb=embed_limit_mb,
     )
 
 
@@ -7023,6 +7133,23 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--trace-storage",
+        choices=TRACE_STORAGE_CHOICES,
+        default="auto",
+        help=(
+            "Where the dF/F and inferred-spike arrays go. auto (default): embedded in the HTML when "
+            "they fit --embed-limit-mb, otherwise SESSION_dff.npy / SESSION_inferred_spikes.npy beside it. "
+            "embed: always embedded, so the HTML is one self-contained file. sidecar: always separate .npy files. "
+            "With --html-only, an existing reviewer is converted from its embedded data or sidecars, without recomputing."
+        ),
+    )
+    parser.add_argument(
+        "--embed-limit-mb",
+        type=float,
+        default=None,
+        help=f"Largest encoded size per array, in MB, that --trace-storage auto embeds (default {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)}).",
+    )
+    parser.add_argument(
         "--title",
         default=None,
         help="Title shown at the top of the reviewer and in the browser tab (default: the session name).",
@@ -7037,6 +7164,11 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if args.embed_limit_mb is not None:
+        try:
+            _embed_limit_bytes(args.embed_limit_mb)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.roi_index_label:
         globals()["ROI_INDEX_LABEL"] = args.roi_index_label
     output_dir = args.output_dir
@@ -7064,6 +7196,8 @@ def main() -> None:
         filter_settings=args.filter_settings,
         html_only=args.html_only,
         title=args.title,
+        trace_storage=args.trace_storage,
+        embed_limit_mb=args.embed_limit_mb,
     )
     if _LAST_BUILD_WAS_HTML_ONLY:
         print(f"Rebuilt the reviewer from its embedded data; kept the existing PDF and sidecars: {pdf_path.parent}")

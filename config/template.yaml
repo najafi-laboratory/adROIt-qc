@@ -54,6 +54,12 @@ initialize_labels_from_model_scores: false
 # Relative paths resolve against the repository root.
 custom_roi_metrics: []
 
+# Where dF/F and inferred spikes go: auto embeds them in the HTML when each
+# fits embed_limit_mb (default 80) and otherwise writes .npy files beside it;
+# embed always embeds (one self-contained file); sidecar always writes .npy files.
+trace_storage: auto
+embed_limit_mb: null
+
 # Title at the top of the reviewer and in the browser tab. Default: the session name.
 title: null
 
