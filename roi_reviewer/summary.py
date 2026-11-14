@@ -2491,7 +2491,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .oasis-toggle {{ display: flex; gap: 6px; align-items: center; font-weight: 700; }}
 .oasis-toggle input {{ width: auto; }}
 .oasis-threshold-row {{ display: flex; flex: 0 0 auto; gap: 6px; align-items: center; }}
-.oasis-threshold-row input[type="range"] {{ width: 150px; padding: 0; }}
+.oasis-threshold-row input[type="range"] {{ flex: 1 1 auto; min-width: 0; padding: 0; }}
 .oasis-threshold-row input[type="number"] {{ width: 78px; }}
 .threshold-menu-wrap {{ position: relative; flex: 0 0 auto; }}
 .threshold-menu {{ position: absolute; top: calc(100% + 4px); left: 0; width: 360px; max-width: 80vw; padding: 10px 12px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 13px; line-height: 1.4; color: #344054; z-index: 6; display: grid; gap: 8px; }}
@@ -2511,7 +2511,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .threshold-menu .note {{ font-size: 12px; margin: 0; }}
 #wheelZoomHint {{ position: fixed; transform: translate(-50%, -50%); padding: 6px 12px; border-radius: 6px; background: rgba(16, 24, 40, 0.82); color: #fff; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 50; }}
 #wheelZoomHint.visible {{ opacity: 1; }}
-#oasisThresholdEquivalent {{ white-space: nowrap; }}
+#thresholdMenuButton .threshold-button-value {{ font-variant-numeric: tabular-nums; }}
 .plots {{ display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }}
 .trace-sort {{ display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 6px 0 10px; padding: 8px 10px; background: #f8fafc; border: 1px solid #d0d5dd; border-radius: 6px; }}
 .trace-sort label {{ font-size: 14px; color: #475467; }}
@@ -2956,19 +2956,18 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
           <div class="trace-header-controls" id="traceOasisControls">
             <label class="oasis-toggle spike-only"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
-            <label class="spike-only" for="oasisThresholdSlider">Spike threshold</label>
-            <div class="oasis-threshold-row spike-only">
-              <input id="oasisThresholdSlider" type="range" min="0" max="1" step="0.001" value="0.05" aria-label="Inferred spike threshold">
-              <input id="oasisThreshold" type="number" step="0.001" value="0.05" aria-label="Inferred spike threshold value">
-              <span id="oasisThresholdEquivalent" class="note"></span>
-            </div>
             <div class="threshold-menu-wrap spike-only">
-              <button id="thresholdMenuButton" type="button" aria-expanded="false" aria-controls="thresholdMenu">Threshold options</button>
+              <button id="thresholdMenuButton" type="button" aria-expanded="false" aria-controls="thresholdMenu" title="Inferred spike threshold and its options">Spike threshold</button>
               <div id="thresholdMenu" class="threshold-menu" role="dialog" aria-label="Inferred spike threshold options" hidden>
                 <div class="threshold-menu-head">
                   <strong>Inferred spike threshold</strong>
                   <button type="button" class="threshold-info-icon" id="thresholdSdInfo" aria-expanded="false" aria-controls="thresholdSdInfoText" title="How SD thresholds are computed">i</button>
                 </div>
+                <div class="oasis-threshold-row">
+                  <input id="oasisThresholdSlider" type="range" min="0" max="1" step="0.001" value="0.05" aria-label="Inferred spike threshold">
+                  <input id="oasisThreshold" type="number" step="0.001" value="0.05" aria-label="Inferred spike threshold value">
+                </div>
+                <div id="oasisThresholdEquivalent" class="note"></div>
                 <div id="thresholdSdInfoText" class="threshold-info" hidden>SDs are computed separately for each ROI from that ROI&apos;s own inferred-spike values, never pooled across the session, so one <em>k</em> gives each ROI its own amplitude threshold.</div>
                 <label class="threshold-field">Units
                   <select id="oasisThresholdMode">
@@ -3007,7 +3006,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <input id="oasisFile" type="file" accept=".npy">
         </div>
         <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; <strong>Threshold options</strong> sets the units (absolute or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; the <strong>Spike threshold</strong> menu holds the slider and sets the units (absolute or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
@@ -3372,6 +3371,7 @@ function setOasisThreshold(value, redraw = true) {{
   configureOasisThresholdControls();
   if (redraw) {{ drawSelectedTraceAndOasis(); if (gbuRateMode === "roi") scheduleGbuSummaryDraw(); }}
   syncThresholdMenu();
+  updateThresholdButton();
 }}
 function selectedOasisDefaultThreshold() {{ return defaultThresholdFor(selected); }}
 function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
@@ -6234,6 +6234,19 @@ document.getElementById("showInferredSpikes").addEventListener("change", event =
   showInferredSpikes = event.target.checked;
   draw();
 }});
+function updateThresholdButton() {{
+  const button = document.getElementById("thresholdMenuButton");
+  if (!button) return;
+  const value = sdModeActive()
+    ? `${{kFromThreshold(oasisEventThreshold, spikeThresholdStats(selected)).toFixed(2)}} SD (${{fmt(oasisEventThreshold)}})`
+    : fmt(oasisEventThreshold);
+  button.textContent = "Spike threshold: ";
+  const span = document.createElement("span");
+  span.className = "threshold-button-value";
+  span.textContent = value + (thresholdScope === "all" ? ", all ROIs" : "");
+  button.appendChild(span);
+  button.appendChild(document.createTextNode(" \u25BE"));
+}}
 function unitsLabel() {{
   return oasisThresholdMode === "sd" ? `k (${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}})` : "absolute value";
 }}
@@ -6258,9 +6271,10 @@ function syncThresholdMenu() {{
   allBox.step = oasisThresholdMode === "sd" ? 0.01 : 0.001;
   if (document.activeElement !== allBox) allBox.value = Number.isFinite(thresholdAllValue) ? Number(thresholdAllValue.toPrecision(4)) : "";
   document.getElementById("thresholdAllUnits").textContent = oasisThresholdMode === "sd" ? "SD" : "";
+  updateThresholdButton();
   document.getElementById("thresholdScopeNote").textContent = thresholdScope === "all"
-    ? "Every ROI uses this setting when selected and in the summary by QC label; the slider changes it for all ROIs."
-    : "Each ROI starts from its own default; the slider changes only the selected ROI. The summary by QC label uses the defaults.";
+    ? "Every ROI uses this setting when selected and in the summary by QC label; the slider above changes it for all ROIs."
+    : "Each ROI starts from its own default; the slider above changes only the selected ROI. The summary by QC label uses the defaults.";
 }}
 let thresholdRuleTimer = null;
 function scheduleThresholdRuleUpdate() {{
