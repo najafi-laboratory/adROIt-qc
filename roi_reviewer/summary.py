@@ -2493,7 +2493,24 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .oasis-threshold-row {{ display: flex; flex: 0 0 auto; gap: 6px; align-items: center; }}
 .oasis-threshold-row input[type="range"] {{ width: 150px; padding: 0; }}
 .oasis-threshold-row input[type="number"] {{ width: 78px; }}
-#oasisThresholdMode {{ font-size: 13px; padding: 2px 4px; }}
+.threshold-menu-wrap {{ position: relative; flex: 0 0 auto; }}
+.threshold-menu {{ position: absolute; top: calc(100% + 4px); left: 0; width: 360px; max-width: 80vw; padding: 10px 12px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 13px; line-height: 1.4; color: #344054; z-index: 6; display: grid; gap: 8px; }}
+.threshold-menu[hidden] {{ display: none; }}
+.threshold-menu-head {{ display: flex; align-items: center; gap: 8px; }}
+.threshold-info-icon {{ width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; color: #475467; font: italic 700 11px Georgia, "Times New Roman", serif; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }}
+.threshold-info-icon[aria-expanded="true"], .threshold-info-icon:hover {{ border-color: #175cd3; color: #175cd3; }}
+.threshold-info {{ font-size: 12px; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 4px; padding: 6px 8px; }}
+.threshold-field {{ display: grid; gap: 3px; font-weight: 600; }}
+.threshold-field select {{ font-weight: 400; font-size: 13px; padding: 2px 4px; width: 100%; max-width: 100%; box-sizing: border-box; }}
+.threshold-scope {{ border: 1px solid #eaecf0; border-radius: 4px; padding: 6px 8px; margin: 0; display: grid; gap: 4px; }}
+.threshold-scope legend {{ font-weight: 600; padding: 0 4px; }}
+.threshold-scope label {{ display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; font-weight: 400; margin: 0; text-align: left; }}
+.threshold-scope input[type="radio"] {{ width: auto; height: auto; margin: 0; flex: 0 0 auto; }}
+.threshold-scope input[type="number"] {{ width: 78px; flex: 0 0 auto; margin: 0; }}
+.threshold-scope button, .threshold-menu > button {{ justify-self: start; }}
+.threshold-menu .note {{ font-size: 12px; margin: 0; }}
+#wheelZoomHint {{ position: fixed; transform: translate(-50%, -50%); padding: 6px 12px; border-radius: 6px; background: rgba(16, 24, 40, 0.82); color: #fff; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 50; }}
+#wheelZoomHint.visible {{ opacity: 1; }}
 #oasisThresholdEquivalent {{ white-space: nowrap; }}
 .plots {{ display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }}
 .trace-sort {{ display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 6px 0 10px; padding: 8px 10px; background: #f8fafc; border: 1px solid #d0d5dd; border-radius: 6px; }}
@@ -2939,17 +2956,46 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
           <div class="trace-header-controls" id="traceOasisControls">
             <label class="oasis-toggle spike-only"><input id="showInferredSpikes" type="checkbox" checked> Show Inferred Spikes</label>
-            <label class="spike-only">Amplitude threshold</label>
-            <select id="oasisThresholdMode" class="spike-only" aria-label="Threshold units" title="Absolute: the amplitude itself. SD: mean + k x SD of the selected ROI's non-zero inferred-spike values, so the same k adapts to each ROI.">
-              <option value="absolute" selected>Absolute</option>
-              <option value="sd">SD (non-zero)</option>
-            </select>
+            <label class="spike-only" for="oasisThresholdSlider">Spike threshold</label>
             <div class="oasis-threshold-row spike-only">
-              <input id="oasisThresholdSlider" type="range" min="0" max="1" step="0.001" value="0.05">
-              <input id="oasisThreshold" type="number" min="0" step="0.001" value="0.05">
+              <input id="oasisThresholdSlider" type="range" min="0" max="1" step="0.001" value="0.05" aria-label="Inferred spike threshold">
+              <input id="oasisThreshold" type="number" step="0.001" value="0.05" aria-label="Inferred spike threshold value">
               <span id="oasisThresholdEquivalent" class="note"></span>
             </div>
-            <button id="resetOasisThreshold" type="button" class="spike-only">Reset to ROI default</button>
+            <div class="threshold-menu-wrap spike-only">
+              <button id="thresholdMenuButton" type="button" aria-expanded="false" aria-controls="thresholdMenu">Threshold options</button>
+              <div id="thresholdMenu" class="threshold-menu" role="dialog" aria-label="Inferred spike threshold options" hidden>
+                <div class="threshold-menu-head">
+                  <strong>Inferred spike threshold</strong>
+                  <button type="button" class="threshold-info-icon" id="thresholdSdInfo" aria-expanded="false" aria-controls="thresholdSdInfoText" title="How SD thresholds are computed">i</button>
+                </div>
+                <div id="thresholdSdInfoText" class="threshold-info" hidden>SDs are computed separately for each ROI from that ROI&apos;s own inferred-spike values, never pooled across the session, so one <em>k</em> gives each ROI its own amplitude threshold.</div>
+                <label class="threshold-field">Units
+                  <select id="oasisThresholdMode">
+                    <option value="absolute" selected>Absolute value</option>
+                    <option value="sd">SD (k standard deviations)</option>
+                  </select>
+                </label>
+                <label class="threshold-field" id="sdStatisticField">SD measured as
+                  <select id="oasisSdStatistic">
+                    <option value="auto" selected>Auto (chosen from this session&apos;s values)</option>
+                    <option value="nonzero">Mean + k SD of non-zero values (sparse: OASIS, Suite2p, CaImAn, spike counts)</option>
+                    <option value="all">Mean + k SD of all frames (dense: spike rates or probabilities, e.g. CASCADE)</option>
+                    <option value="robust">Median + k robust SD of all frames (signed or noisy outputs)</option>
+                  </select>
+                </label>
+                <div class="note" id="sdStatisticNote"></div>
+                <fieldset class="threshold-scope">
+                  <legend>Default for all ROIs</legend>
+                  <label><input type="radio" name="thresholdScope" value="roi" checked> Each ROI&apos;s own default</label>
+                  <label><input type="radio" name="thresholdScope" value="all"> Same setting for every ROI:
+                    <input id="thresholdAllValue" type="number" step="0.001" aria-label="Threshold for all ROIs"> <span id="thresholdAllUnits"></span></label>
+                  <button id="thresholdUseCurrent" type="button">Use current slider value</button>
+                </fieldset>
+                <div class="note" id="thresholdScopeNote"></div>
+                <button id="resetOasisThreshold" type="button">Reset selected ROI to default</button>
+              </div>
+            </div>
             <button id="loadDffFile" type="button" title="Choose an ROI x frame float32 .npy file">Load dF/F</button>
             <button id="loadOasisFile" type="button" title="Choose an ROI x frame float32 .npy file">Load inferred spikes</button>
             <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
@@ -2961,7 +3007,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <input id="oasisFile" type="file" accept=".npy">
         </div>
         <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, probabilities or 0/1 events, from any method), and frames above the threshold, set as an absolute amplitude or as <em>k</em> SD above the mean of the selected ROI&apos;s non-zero values, are drawn as red dots and used for the average transient and taus. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; <strong>Threshold options</strong> sets the units (absolute or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
@@ -2978,7 +3024,7 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
           <p class="load-info-rule" id="traceLoadSession"></p>
         </div>
         <canvas id="traceCanvas"></canvas>
-        <div class="note">Wheel or drag to zoom/pan time. Double-click to reset.</div>
+        <div class="note">Ctrl/&#8984; + scroll or pinch to zoom time, drag to pan. Double-click to reset.</div>
         <div class="controls">
           <label>Start s <input id="timeStart" type="number" min="0" step="0.001" value="0"></label>
           <label>End s <input id="timeEnd" type="number" min="0" step="0.001" value="0"></label>
@@ -3072,7 +3118,7 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
         <button id="showAllVisibleTraces" type="button">Show all visible traces</button>
       </div>
       <canvas id="stackCanvas"></canvas>
-      <div class="note">Wheel to zoom time.</div>
+      <div class="note">Ctrl/&#8984; + scroll or pinch to zoom time.</div>
     </div>
     <div class="panel">
       <div class="title">Motion correction shift per frame</div>
@@ -3172,30 +3218,114 @@ let showInferredSpikes = true;
 let oasisSpikeMin = 0;
 let oasisSpikeMax = 1;
 let oasisDiagnosticsCache = new Map();
-// Threshold units. "absolute": the inferred-spike amplitude. "sd": k standard deviations above the
-// mean of the selected ROI's non-zero inferred-spike values (threshold = mean + k * SD), so one k
-// adapts to each ROI. oasisEventThreshold always holds the resulting absolute amplitude.
+// Threshold units. "absolute": the inferred-spike value itself. "sd": center + k * scale of the
+// selected ROI's own values (computed per ROI, never pooled across the session), so one k adapts to
+// each ROI. How center and scale are measured depends on the spike format:
+//   nonzero: mean and SD of the non-zero values (sparse non-negative outputs such as OASIS)
+//   all:     mean and SD of every frame (dense rates or probabilities, e.g. CASCADE)
+//   robust:  median and 1.4826 x median absolute deviation of every frame (signed or noisy outputs)
+// oasisEventThreshold always holds the resulting absolute value.
 let oasisThresholdMode = "absolute";
 let oasisThresholdK = 2;
-const nonzeroSpikeStatsCache = new Map();
-function nonzeroSpikeStats(roi) {{
-  if (nonzeroSpikeStatsCache.has(roi)) return nonzeroSpikeStatsCache.get(roi);
-  const sp = spikeTrace(roi);
-  let n = 0, sum = 0, sumSq = 0, min = Infinity, max = -Infinity;
-  if (sp) for (let i = 0; i < sp.length; i++) {{
-    const v = sp[i];
-    if (!Number.isFinite(v) || v === 0) continue;
-    n++; sum += v; sumSq += v * v; if (v < min) min = v; if (v > max) max = v;
+let oasisSdStatistic = "auto";
+let autoSdStatisticCache = null;
+// Default for all ROIs: "roi" uses each ROI's generator default; "all" applies thresholdAllValue,
+// in the current units, to every ROI (selection and the summary by QC label).
+let thresholdScope = "roi";
+let thresholdAllValue = null;
+const spikeStatsCache = new Map();
+function quickSelect(arr, k) {{
+  let lo = 0, hi = arr.length - 1;
+  while (hi > lo) {{
+    const pivot = arr[(lo + hi) >> 1];
+    let i = lo, j = hi;
+    while (i <= j) {{
+      while (arr[i] < pivot) i++;
+      while (arr[j] > pivot) j--;
+      if (i <= j) {{ const t = arr[i]; arr[i] = arr[j]; arr[j] = t; i++; j--; }}
+    }}
+    if (k <= j) hi = j; else if (k >= i) lo = i; else return arr[k];
   }}
-  const mean = n ? sum / n : NaN;
-  const sd = n > 1 ? Math.sqrt(Math.max(0, (sumSq - n * mean * mean) / (n - 1))) : NaN;
-  const stats = {{n, mean, sd, min, max, usable: n > 1 && sd > 0}};
-  if (sp) nonzeroSpikeStatsCache.set(roi, stats);
+  return arr[k];
+}}
+function medianOf(values) {{
+  const n = values.length;
+  if (!n) return NaN;
+  const hi = quickSelect(values, n >> 1);
+  if (n % 2) return hi;
+  let lo = -Infinity;
+  for (let i = 0; i < (n >> 1); i++) if (values[i] > lo) lo = values[i];
+  return (lo + hi) / 2;
+}}
+function resolvedSdStatistic() {{
+  if (oasisSdStatistic !== "auto") return oasisSdStatistic;
+  if (autoSdStatisticCache) return autoSdStatisticCache;
+  if (!oasisSpikes) return "nonzero";
+  // Strided sample of the whole array: signed values -> robust; mostly zeros -> nonzero; else all.
+  const step = Math.max(1, Math.floor(oasisSpikes.length / 2e6));
+  let finite = 0, zeros = 0, negative = 0;
+  for (let i = 0; i < oasisSpikes.length; i += step) {{
+    const v = oasisSpikes[i];
+    if (!Number.isFinite(v)) continue;
+    finite++; if (v === 0) zeros++; else if (v < 0) negative++;
+  }}
+  autoSdStatisticCache = !finite ? "nonzero" : negative / finite > 0.01 ? "robust" : zeros / finite > 0.5 ? "nonzero" : "all";
+  return autoSdStatisticCache;
+}}
+const SD_STATISTIC_TEXT = {{
+  nonzero: "mean + k SD of non-zero values",
+  all: "mean + k SD of all frames",
+  robust: "median + k robust SD (1.4826 x MAD) of all frames",
+}};
+function spikeThresholdStats(roi) {{
+  const statistic = resolvedSdStatistic();
+  const key = `${{statistic}}:${{roi}}`;
+  if (spikeStatsCache.has(key)) return spikeStatsCache.get(key);
+  const sp = spikeTrace(roi);
+  let stats = {{n: 0, center: NaN, scale: NaN, min: Infinity, max: -Infinity, usable: false, statistic}};
+  if (sp) {{
+    if (statistic === "robust") {{
+      const values = new Float64Array(sp.length);
+      let n = 0;
+      for (let i = 0; i < sp.length; i++) {{ const v = sp[i]; if (Number.isFinite(v)) values[n++] = v; }}
+      const kept = values.subarray(0, n);
+      let min = Infinity, max = -Infinity;
+      for (let i = 0; i < n; i++) {{ if (kept[i] < min) min = kept[i]; if (kept[i] > max) max = kept[i]; }}
+      const center = medianOf(kept);
+      for (let i = 0; i < n; i++) kept[i] = Math.abs(kept[i] - center);
+      const scale = 1.4826 * medianOf(kept);
+      stats = {{n, center, scale, min, max, usable: n > 1 && scale > 0, statistic}};
+    }} else {{
+      let n = 0, sum = 0, sumSq = 0, min = Infinity, max = -Infinity;
+      for (let i = 0; i < sp.length; i++) {{
+        const v = sp[i];
+        if (!Number.isFinite(v) || (statistic === "nonzero" && v === 0)) continue;
+        n++; sum += v; sumSq += v * v; if (v < min) min = v; if (v > max) max = v;
+      }}
+      const center = n ? sum / n : NaN;
+      const scale = n > 1 ? Math.sqrt(Math.max(0, (sumSq - n * center * center) / (n - 1))) : NaN;
+      stats = {{n, center, scale, min, max, usable: n > 1 && scale > 0, statistic}};
+    }}
+    spikeStatsCache.set(key, stats);
+  }}
   return stats;
 }}
-function thresholdFromK(k, stats) {{ return stats.mean + k * stats.sd; }}
-function kFromThreshold(value, stats) {{ return (value - stats.mean) / stats.sd; }}
-function sdModeActive() {{ return oasisThresholdMode === "sd" && nonzeroSpikeStats(selected).usable; }}
+function thresholdFromK(k, stats) {{ return stats.center + k * stats.scale; }}
+function kFromThreshold(value, stats) {{ return (value - stats.center) / stats.scale; }}
+function sdModeActive() {{ return oasisThresholdMode === "sd" && spikeThresholdStats(selected).usable; }}
+function generatorDefaultThreshold(roi) {{
+  const value = dffMetric(roi, "oasis_optimal_threshold");
+  return Number.isFinite(Number(value)) ? Number(value) : Number(data.oasisEventThreshold ?? 0.05);
+}}
+function defaultThresholdFor(roi) {{
+  // The threshold an ROI gets on selection and in the summary by QC label.
+  if (thresholdScope !== "all" || !Number.isFinite(thresholdAllValue)) return generatorDefaultThreshold(roi);
+  if (oasisThresholdMode === "sd") {{
+    const stats = spikeThresholdStats(roi);
+    return stats.usable ? thresholdFromK(thresholdAllValue, stats) : generatorDefaultThreshold(roi);
+  }}
+  return thresholdAllValue;
+}}
 function configureOasisThresholdControls() {{
   const sp = spikeTrace(selected);
   if (sp) {{
@@ -3218,7 +3348,7 @@ function configureOasisThresholdControls() {{
   const slider = document.getElementById("oasisThresholdSlider");
   const box = document.getElementById("oasisThreshold");
   const equivalent = document.getElementById("oasisThresholdEquivalent");
-  const stats = nonzeroSpikeStats(selected);
+  const stats = spikeThresholdStats(selected);
   if (sdModeActive()) {{
     const kMin = Math.floor(100 * kFromThreshold(oasisSpikeMin, stats)) / 100;
     const kMax = Math.ceil(100 * kFromThreshold(oasisSpikeMax, stats)) / 100;
@@ -3230,7 +3360,7 @@ function configureOasisThresholdControls() {{
     for (const el of [slider, box]) {{ el.min = oasisSpikeMin.toPrecision(6); el.max = oasisSpikeMax.toPrecision(6); el.step = 0.001; }}
     slider.value = oasisEventThreshold; box.value = oasisEventThreshold;
     if (equivalent) {{
-      if (oasisThresholdMode === "sd") equivalent.textContent = "SD needs at least two different non-zero values for this ROI";
+      if (oasisThresholdMode === "sd") equivalent.textContent = "SD needs at least two different values for this ROI";
       else equivalent.textContent = stats.usable ? `(${{kFromThreshold(oasisEventThreshold, stats).toFixed(2)}} SD)` : "";
     }}
   }}
@@ -3240,12 +3370,10 @@ function setOasisThreshold(value, redraw = true) {{
   const next = Number.isFinite(value) ? value : fallback;
   oasisEventThreshold = Math.min(Math.max(next, oasisSpikeMin), oasisSpikeMax);
   configureOasisThresholdControls();
-  if (redraw) drawSelectedTraceAndOasis();
+  if (redraw) {{ drawSelectedTraceAndOasis(); if (gbuRateMode === "roi") scheduleGbuSummaryDraw(); }}
+  syncThresholdMenu();
 }}
-function selectedOasisDefaultThreshold() {{
-  const value = dffMetric(selected, "oasis_optimal_threshold");
-  return Number.isFinite(Number(value)) ? Number(value) : Number(data.oasisEventThreshold ?? 0.05);
-}}
+function selectedOasisDefaultThreshold() {{ return defaultThresholdFor(selected); }}
 function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
   const parsed = parseNpy(arrayBuffer);
   dff = parsed.array;
@@ -3390,7 +3518,8 @@ updateSpikeSourceLinks();
 function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
   const parsed = parseNpy(arrayBuffer);
   oasisSpikes = parsed.array;
-  nonzeroSpikeStatsCache.clear();
+  spikeStatsCache.clear();
+  autoSdStatisticCache = null;
   data.oasisAvailable = true;
   setOasisDiagnosticsVisible(true);
   data.oasisStorageMode = data.oasisStorageMode === "file" ? data.oasisStorageMode : "uploaded";
@@ -3850,6 +3979,39 @@ function syncControlColumnHeight() {{
 function trace(roi) {{
   if (!dff) return null;
   return dff.subarray(roi * data.nFrames, (roi + 1) * data.nFrames);
+}}
+// Wheel over a plot is ambiguous: the same gesture can mean "scroll the page" or "zoom the plot",
+// and which one the browser allows depends on whether a page scroll is already under way. So a plain
+// wheel always scrolls the page, and zoom needs Ctrl or Cmd held (a trackpad pinch arrives as Ctrl +
+// wheel). A plain wheel over a zoomable plot shows a short hint instead.
+let wheelHintTimer = null;
+function showWheelHint(target) {{
+  let hint = document.getElementById("wheelZoomHint");
+  if (!hint) {{
+    hint = document.createElement("div");
+    hint.id = "wheelZoomHint";
+    hint.setAttribute("role", "status");
+    document.body.appendChild(hint);
+  }}
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  hint.textContent = mac ? "Hold \u2318 (or pinch) and scroll to zoom" : "Hold Ctrl (or pinch) and scroll to zoom";
+  const rect = target.getBoundingClientRect();
+  hint.style.left = `${{Math.round(rect.left + rect.width / 2)}}px`;
+  hint.style.top = `${{Math.round(Math.max(rect.top, 0) + Math.min(rect.height, window.innerHeight - Math.max(rect.top, 0)) / 2)}}px`;
+  hint.classList.add("visible");
+  clearTimeout(wheelHintTimer);
+  wheelHintTimer = setTimeout(() => hint.classList.remove("visible"), 1100);
+}}
+function wheelZoomIntent(event) {{
+  if (!(event.ctrlKey || event.metaKey)) {{ showWheelHint(event.currentTarget || event.target); return false; }}
+  return event.cancelable;
+}}
+function wheelZoomFactor(event, perPixel) {{
+  // > 1 zooms out, < 1 zooms in; scaled by wheel distance so a pinch zooms smoothly and a mouse
+  // notch (about 100 px) gives the same step as before.
+  const unit = event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1;
+  const dy = Math.max(-200, Math.min(200, event.deltaY * unit));
+  return Math.exp(dy * perPixel);
 }}
 function spikeTrace(roi) {{
   if (!oasisSpikes) return null;
@@ -4470,7 +4632,7 @@ function setSelected(roi) {{
   const roiModelText = roiModelScore
     ? ` | ROI model score ${{roiModelState}} p(good) ${{fmt(roiModelScore.probability)}}`
     : "";
-  if (data.oasisAvailable) setOasisThreshold(sdModeActive() ? thresholdFromK(oasisThresholdK, nonzeroSpikeStats(selected)) : selectedOasisDefaultThreshold(), false);
+  if (data.oasisAvailable) setOasisThreshold(thresholdScope !== "all" && sdModeActive() ? thresholdFromK(oasisThresholdK, spikeThresholdStats(selected)) : defaultThresholdFor(selected), false);
   document.getElementById("roiInput").value = suite2pRoi;
   document.getElementById("roiDetailsSummary").textContent = "Selected ROI Details";
   document.getElementById("readout").textContent = `cell identity ${{cellType}}${{roiModelText}} | area ${{fmt(dffMetrics.roi_area)}} px | skew ${{fmt(metrics.skew)}} connect ${{metrics.connect}} aspect ${{fmt(metrics.aspect)}} compact ${{fmt(metrics.compact)}} | SNR: 95/50 percentile ${{fmt(snr9550)}} | SNR: CaImAn (large-transient score) ${{fmt(postdocSnr)}} | inferred spike SNR ${{fmt(dffMetricValue(dffMetrics, "oasis_event_snr"))}} | rise tau ${{fmt(dffMetricValue(dffMetrics, "oasis_rise_tau_seconds"))}} s | decay tau ${{fmt(dffMetricValue(dffMetrics, "oasis_decay_tau_seconds"))}} s`;
@@ -4892,11 +5054,11 @@ function resetFovZoom() {{
 function setupFovZoom() {{
   document.querySelectorAll(".fov-review .imagewrap").forEach(wrap => {{
     wrap.addEventListener("wheel", event => {{
-      if (!event.cancelable) return;  // the page is mid-scroll: let it finish instead of zooming as well
+      if (!wheelZoomIntent(event)) return;  // plain wheel scrolls the page; Ctrl/Cmd + wheel or pinch zooms
       event.preventDefault();
       const rect = wrap.getBoundingClientRect();
       const oldScale = fovZoom.scale;
-      const nextScale = Math.min(8, Math.max(1, oldScale * (event.deltaY < 0 ? 1.18 : 1 / 1.18)));
+      const nextScale = Math.min(8, Math.max(1, oldScale / wheelZoomFactor(event, 0.00166)));
       const px = event.clientX - rect.left;
       const py = event.clientY - rect.top;
       fovZoom.x = px - (px - fovZoom.x) * (nextScale / oldScale);
@@ -5590,17 +5752,30 @@ var gbuGeneration = 0;
 var gbuProgress = 0;
 var gbuDrawPending = false;
 var gbuRateMode = "label";  // "label": rate distribution per label; "roi": selected ROI over time
-function gbuDefaultThreshold(roi) {{
-  const value = dffMetric(roi, "oasis_optimal_threshold");
-  return Number.isFinite(Number(value)) ? Number(value) : Number(data.oasisEventThreshold ?? 0.05);
+function gbuDefaultThreshold(roi) {{ return defaultThresholdFor(roi); }}
+function thresholdEvents(roi, threshold) {{
+  // Event frames exactly as in selectedOasisDiagnostics, without the waveform and decay fit.
+  const tr = trace(roi), sp = spikeTrace(roi);
+  if (!tr || !sp) return null;
+  const preFrames = Math.max(3, Math.round(data.frameRate * 0.5));
+  const postFrames = Math.max(6, Math.round(data.frameRate * 2.0));
+  const minSeparation = Math.max(1, Math.round(data.frameRate * 0.25));
+  const events = [];
+  let last = -Infinity;
+  for (let f = preFrames; f < data.nFrames - postFrames; f++) {{
+    if (!Number.isFinite(sp[f]) || sp[f] <= threshold) continue;
+    if (f - last < minSeparation) continue;
+    events.push(f);
+    last = f;
+  }}
+  return {{events}};
 }}
 var GBU_MAX_ABS_DFF = 20;  // same plausibility rule as multi_session_qc_summary (max_abs_dff)
 function gbuRoiSummary(roi) {{
   // Events and windows follow the selected-ROI fit panel; windows whose baseline-subtracted dF/F
   // exceeds GBU_MAX_ABS_DFF in magnitude are left out of the average but still count as events.
   const threshold = gbuDefaultThreshold(roi);
-  const d = selectedOasisDiagnostics(roi, threshold);
-  if (roi !== selected) oasisDiagnosticsCache.delete(`${{roi}}:${{Number(threshold).toPrecision(8)}}`);
+  const d = thresholdEvents(roi, threshold);
   if (!d) return null;
   const tr = trace(roi);
   const preFrames = Math.max(3, Math.round(data.frameRate * 0.5));
@@ -6059,26 +6234,118 @@ document.getElementById("showInferredSpikes").addEventListener("change", event =
   showInferredSpikes = event.target.checked;
   draw();
 }});
+function unitsLabel() {{
+  return oasisThresholdMode === "sd" ? `k (${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}})` : "absolute value";
+}}
+function syncThresholdMenu() {{
+  const menu = document.getElementById("thresholdMenu");
+  if (!menu) return;
+  document.getElementById("oasisThresholdMode").value = oasisThresholdMode;
+  document.getElementById("oasisSdStatistic").value = oasisSdStatistic;
+  document.getElementById("sdStatisticField").hidden = oasisThresholdMode !== "sd";
+  const note = document.getElementById("sdStatisticNote");
+  note.hidden = oasisThresholdMode !== "sd";
+  if (oasisThresholdMode === "sd") {{
+    const stats = spikeThresholdStats(selected);
+    const chosen = oasisSdStatistic === "auto" ? `Auto chose ${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}}. ` : "";
+    note.textContent = stats.usable
+      ? `${{chosen}}Selected ROI: center ${{fmt(stats.center)}}, SD ${{fmt(stats.scale)}} from ${{stats.n.toLocaleString()}} values.`
+      : `${{chosen}}The selected ROI has too few distinct values for an SD; its absolute threshold is used.`;
+  }}
+  document.querySelectorAll('input[name="thresholdScope"]').forEach(r => {{ r.checked = r.value === thresholdScope; }});
+  const allBox = document.getElementById("thresholdAllValue");
+  allBox.disabled = thresholdScope !== "all";
+  allBox.step = oasisThresholdMode === "sd" ? 0.01 : 0.001;
+  if (document.activeElement !== allBox) allBox.value = Number.isFinite(thresholdAllValue) ? Number(thresholdAllValue.toPrecision(4)) : "";
+  document.getElementById("thresholdAllUnits").textContent = oasisThresholdMode === "sd" ? "SD" : "";
+  document.getElementById("thresholdScopeNote").textContent = thresholdScope === "all"
+    ? "Every ROI uses this setting when selected and in the summary by QC label; the slider changes it for all ROIs."
+    : "Each ROI starts from its own default; the slider changes only the selected ROI. The summary by QC label uses the defaults.";
+}}
+let thresholdRuleTimer = null;
+function scheduleThresholdRuleUpdate() {{
+  // Recompute the summary by QC label for a changed default (debounced while dragging or typing).
+  clearTimeout(thresholdRuleTimer);
+  thresholdRuleTimer = setTimeout(() => {{ if (data.oasisAvailable) invalidateGbuSummary(); }}, 250);
+}}
+function currentControlValue() {{
+  return sdModeActive() ? kFromThreshold(oasisEventThreshold, spikeThresholdStats(selected)) : oasisEventThreshold;
+}}
 function setOasisThresholdFromControl(value) {{
   if (!Number.isFinite(value)) return;
   if (sdModeActive()) {{
     oasisThresholdK = value;
-    setOasisThreshold(thresholdFromK(value, nonzeroSpikeStats(selected)));
+    setOasisThreshold(thresholdFromK(value, spikeThresholdStats(selected)));
   }} else setOasisThreshold(value);
+  if (thresholdScope === "all" && (oasisThresholdMode !== "sd" || sdModeActive())) {{
+    thresholdAllValue = value;
+    syncThresholdMenu();
+    scheduleThresholdRuleUpdate();
+  }}
 }}
 document.getElementById("oasisThresholdSlider").addEventListener("input", event => setOasisThresholdFromControl(Number(event.target.value)));
 document.getElementById("oasisThreshold").addEventListener("input", event => setOasisThresholdFromControl(Number(event.target.value)));
 document.getElementById("oasisThresholdMode").addEventListener("change", event => {{
+  const stats = spikeThresholdStats(selected);
+  const absolute = thresholdScope === "all" ? defaultThresholdFor(selected) : oasisEventThreshold;
   oasisThresholdMode = event.target.value;
-  const stats = nonzeroSpikeStats(selected);
   if (oasisThresholdMode === "sd" && stats.usable) oasisThresholdK = kFromThreshold(oasisEventThreshold, stats);
+  // A default for all ROIs keeps its meaning by converting through the selected ROI.
+  if (thresholdScope === "all") thresholdAllValue = oasisThresholdMode === "sd" ? (stats.usable ? kFromThreshold(absolute, stats) : oasisThresholdK) : absolute;
   configureOasisThresholdControls();
+  syncThresholdMenu();
+  if (thresholdScope === "all") scheduleThresholdRuleUpdate();
+}});
+document.getElementById("oasisSdStatistic").addEventListener("change", event => {{
+  oasisSdStatistic = event.target.value;
+  if (sdModeActive()) setOasisThreshold(thresholdFromK(oasisThresholdK, spikeThresholdStats(selected)));
+  else configureOasisThresholdControls();
+  syncThresholdMenu();
+  if (thresholdScope === "all" && oasisThresholdMode === "sd") scheduleThresholdRuleUpdate();
+}});
+document.querySelectorAll('input[name="thresholdScope"]').forEach(radio => radio.addEventListener("change", event => {{
+  thresholdScope = event.target.value;
+  if (thresholdScope === "all" && !Number.isFinite(thresholdAllValue)) thresholdAllValue = currentControlValue();
+  setOasisThreshold(defaultThresholdFor(selected));
+  if (sdModeActive()) oasisThresholdK = kFromThreshold(oasisEventThreshold, spikeThresholdStats(selected));
+  syncThresholdMenu();
+  scheduleThresholdRuleUpdate();
+}}));
+document.getElementById("thresholdAllValue").addEventListener("input", event => {{
+  const value = Number(event.target.value);
+  if (!Number.isFinite(value) || thresholdScope !== "all") return;
+  thresholdAllValue = value;
+  if (sdModeActive()) oasisThresholdK = value;
+  setOasisThreshold(defaultThresholdFor(selected));
+  scheduleThresholdRuleUpdate();
+}});
+document.getElementById("thresholdUseCurrent").addEventListener("click", () => {{
+  thresholdScope = "all";
+  thresholdAllValue = currentControlValue();
+  setOasisThreshold(defaultThresholdFor(selected));
+  syncThresholdMenu();
+  scheduleThresholdRuleUpdate();
 }});
 document.getElementById("resetOasisThreshold").addEventListener("click", () => {{
-  const value = selectedOasisDefaultThreshold();
-  if (sdModeActive()) oasisThresholdK = kFromThreshold(value, nonzeroSpikeStats(selected));
+  const value = defaultThresholdFor(selected);
+  if (sdModeActive()) oasisThresholdK = kFromThreshold(value, spikeThresholdStats(selected));
   setOasisThreshold(value);
 }});
+function toggleThresholdMenu(force) {{
+  const menu = document.getElementById("thresholdMenu"), button = document.getElementById("thresholdMenuButton");
+  const open = force === undefined ? menu.hidden : force;
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  if (open) syncThresholdMenu();
+}}
+document.getElementById("thresholdMenuButton").addEventListener("click", event => {{ event.stopPropagation(); toggleThresholdMenu(); }});
+document.getElementById("thresholdSdInfo").addEventListener("click", () => {{
+  const box = document.getElementById("thresholdSdInfoText"), button = document.getElementById("thresholdSdInfo");
+  box.hidden = !box.hidden;
+  button.setAttribute("aria-expanded", String(!box.hidden));
+}});
+document.addEventListener("click", event => {{ if (!event.target.closest("#thresholdMenu, #thresholdMenuButton")) toggleThresholdMenu(false); }});
+document.addEventListener("keydown", event => {{ if (event.key === "Escape") toggleThresholdMenu(false); }});
 function csvEscape(value) {{
   const text = String(value ?? "");
   return /[",\\n]/.test(text) ? `"${{text.replaceAll('"', '""')}}"` : text;
@@ -6475,15 +6742,15 @@ window.addEventListener("keydown", event => {{
   else if (event.key === "ArrowRight") moveVisible(1);
 }});
 document.getElementById("stackCanvas").addEventListener("wheel", e => {{
-  if (!e.cancelable) return;  // the page is mid-scroll: let it finish instead of zooming as well
-  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=(e.deltaY<0?.78:1.28)*(x1-x0);
+  if (!wheelZoomIntent(e)) return;  // plain wheel scrolls the page; Ctrl/Cmd + wheel or pinch zooms
+  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=wheelZoomFactor(e, 0.0025)*(x1-x0);
   setFrameWindow(Math.max(0,c-xf*s), Math.min(data.nFrames-1, Math.max(0,c-xf*s)+s));
 }}, {{passive:false}});
 let dragging=false, sx=0, start0=0, start1=0;
 let stackDragging=false, stackSx=0, stackStart0=0, stackStart1=0;
 document.getElementById("traceCanvas").addEventListener("wheel", e => {{
-  if (!e.cancelable) return;  // the page is mid-scroll: let it finish instead of zooming as well
-  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=(e.deltaY<0?.78:1.28)*(x1-x0);
+  if (!wheelZoomIntent(e)) return;  // plain wheel scrolls the page; Ctrl/Cmd + wheel or pinch zooms
+  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=wheelZoomFactor(e, 0.0025)*(x1-x0);
   setFrameWindow(Math.max(0,c-xf*s), Math.min(data.nFrames-1, Math.max(0,c-xf*s)+s));
 }}, {{passive:false}});
 document.getElementById("traceCanvas").addEventListener("mousedown", e => {{ dragging=true; sx=e.clientX; start0=x0; start1=x1; e.target.classList.add("dragging"); }});
@@ -6496,8 +6763,8 @@ window.addEventListener("mouseup", () => {{ stackDragging=false; document.getEle
 document.getElementById("stackCanvas").addEventListener("dblclick", reset);
 let motionDragging=false, motionSx=0, motionStart0=0, motionStart1=0;
 document.getElementById("motionDriftCanvas").addEventListener("wheel", e => {{
-  if (!e.cancelable) return;  // the page is mid-scroll: let it finish instead of zooming as well
-  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=(e.deltaY<0?.78:1.28)*(x1-x0);
+  if (!wheelZoomIntent(e)) return;  // plain wheel scrolls the page; Ctrl/Cmd + wheel or pinch zooms
+  e.preventDefault(); const rect=e.target.getBoundingClientRect(), xf=(e.clientX-rect.left)/rect.width, c=x0+xf*(x1-x0), s=wheelZoomFactor(e, 0.0025)*(x1-x0);
   setFrameWindow(Math.max(0,c-xf*s), Math.min(data.nFrames-1, Math.max(0,c-xf*s)+s));
 }}, {{passive:false}});
 document.getElementById("motionDriftCanvas").addEventListener("mousedown", e => {{ motionDragging=true; motionSx=e.clientX; motionStart0=x0; motionStart1=x1; e.target.classList.add("dragging"); }});
