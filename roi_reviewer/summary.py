@@ -270,6 +270,16 @@ def _estimate_embedded_dff_bytes(n_rois: int, n_frames: int) -> int:
 TRACE_STORAGE_CHOICES = ("auto", "embed", "sidecar")
 
 
+def _parse_bool_flag(value: str) -> bool:
+    """argparse type for true/false options (also 1/0 and yes/no, case-insensitive)."""
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false, got {value!r}")
+
+
 def _embed_limit_bytes(embed_limit_mb: float | None) -> int:
     if embed_limit_mb is None:
         return EMBEDDED_DFF_BYTE_LIMIT
@@ -288,7 +298,7 @@ def _trace_storage_mode(estimated_bytes: int, trace_storage: str, limit_bytes: i
     auto embeds when the encoded estimate fits the limit; embed and sidecar force one mode.
     """
     if trace_storage not in TRACE_STORAGE_CHOICES:
-        raise ValueError(f"--trace-storage must be one of {', '.join(TRACE_STORAGE_CHOICES)}; got {trace_storage!r}.")
+        raise ValueError(f"trace storage must be one of {', '.join(TRACE_STORAGE_CHOICES)}; got {trace_storage!r}.")
     if trace_storage == "embed":
         if estimated_bytes > 512 * 1024 * 1024:
             print(f"warning: embedding about {estimated_bytes / 1024**3:.1f} GB per array; browsers may fail to open an HTML file this large.")
@@ -1950,7 +1960,7 @@ def _apply_filter_settings(payload: dict[str, Any], settings: dict[str, Any]) ->
 
 
 def _convert_trace_storage(html_path: Path, payload: dict[str, Any], trace_storage: str, embed_limit_mb: float | None) -> None:
-    """--html-only with --trace-storage / --embed-limit-mb: move the dF/F and inferred-spike arrays
+    """--html-only with --force-embed / --embed-limit-mb: move the dF/F and inferred-spike arrays
     between the HTML and .npy sidecars using the data already in the reviewer, without recomputing."""
 
     limit_bytes = (
@@ -2193,8 +2203,8 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
     embed_limit_mb_text = f"{embed_limit_bytes / (1024 * 1024):g}"
     trace_storage_policy = str(payload.get("traceStorage") or "auto")
     trace_storage_note = {
-        "embed": " This reviewer was generated with <code>--trace-storage embed</code>, so its arrays are embedded whatever their size.",
-        "sidecar": " This reviewer was generated with <code>--trace-storage sidecar</code>, so its arrays are separate files whatever their size.",
+        "embed": " This reviewer was generated with <code>--force-embed true</code>, so its arrays are embedded whatever their size.",
+        "sidecar": " This reviewer was generated with <code>--force-embed false</code>, so its arrays are separate files whatever their size.",
     }.get(trace_storage_policy, "")
     n_rois = int(payload["nRois"])
     red_available = bool(payload.get("redAvailable"))
@@ -2964,7 +2974,7 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
         </div>
         <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
           <div id="traceLoadStatus"></div>
-          <p class="load-info-rule">Embedded or separate files: by default the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {embed_max_roi_frames:,} (about {embed_limit_mb_text} MB of encoded data per array; set with <code>--embed-limit-mb</code>, or force either mode with <code>--trace-storage embed</code> or <code>sidecar</code>).{trace_storage_note} Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
+          <p class="load-info-rule">Embedded or separate files: by default the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {embed_max_roi_frames:,} (about {embed_limit_mb_text} MB of encoded data per array; set with <code>--embed-limit-mb</code>, or force either mode with <code>--force-embed true</code> or <code>false</code>).{trace_storage_note} Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
           <p class="load-info-rule" id="traceLoadSession"></p>
         </div>
         <canvas id="traceCanvas"></canvas>
@@ -3343,7 +3353,7 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
     const values = data.nRois * data.nFrames;
     const mode = data.dffStorageMode === "file" ? "separate .npy files" : "embedded in this HTML";
     const forced = data.traceStorage === "embed" || data.traceStorage === "sidecar";
-    sessionLine.textContent = `This session: ${{data.nRois.toLocaleString()}} ROIs × ${{data.nFrames.toLocaleString()}} frames = ${{values.toLocaleString()}}; its arrays are ${{mode}}${{forced ? ` (--trace-storage ${{data.traceStorage}})` : ""}}.`;
+    sessionLine.textContent = `This session: ${{data.nRois.toLocaleString()}} ROIs × ${{data.nFrames.toLocaleString()}} frames = ${{values.toLocaleString()}}; its arrays are ${{mode}}${{forced ? ` (--force-embed ${{data.traceStorage === "embed" ? "true" : "false"}})` : ""}}.`;
   }}
   const usesSidecars = data.dffStorageMode === "file" || data.oasisStorageMode === "file";
   note.textContent = usesSidecars
@@ -6742,9 +6752,12 @@ def create_preprocessing_summary(
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
     title: str | None = None,
-    trace_storage: str = "auto",
+    force_embed: bool | None = None,
     embed_limit_mb: float | None = None,
 ) -> tuple[Path, Path]:
+    # force_embed: True always embeds dF/F and inferred spikes, False always writes .npy sidecars,
+    # None (default) decides by size against embed_limit_mb.
+    trace_storage = {True: "embed", False: "sidecar", None: "auto"}[force_embed]
     input_path = Path(os.path.abspath(os.path.expanduser(os.fspath(session_data_path))))
     session_dir, resolved_layout = _resolve_summary_session_and_layout(input_path, input_layout)
     out_dir = Path(output_dir).expanduser().resolve() if output_dir else session_dir
@@ -6973,7 +6986,7 @@ def create_processing_summary(
     filter_settings: str | os.PathLike[str] | None = None,
     html_only: bool = False,
     title: str | None = None,
-    trace_storage: str = "auto",
+    force_embed: bool | None = None,
     embed_limit_mb: float | None = None,
 ) -> tuple[Path, Path]:
     """Create the processing summary PDF and interactive HTML outputs.
@@ -6996,7 +7009,7 @@ def create_processing_summary(
         filter_settings=filter_settings,
         html_only=html_only,
         title=title,
-        trace_storage=trace_storage,
+        force_embed=force_embed,
         embed_limit_mb=embed_limit_mb,
     )
 
@@ -7133,13 +7146,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--trace-storage",
-        choices=TRACE_STORAGE_CHOICES,
-        default="auto",
+        "--force-embed",
+        type=_parse_bool_flag,
+        default=None,
+        metavar="{true,false}",
         help=(
-            "Where the dF/F and inferred-spike arrays go. auto (default): embedded in the HTML when "
-            "they fit --embed-limit-mb, otherwise SESSION_dff.npy / SESSION_inferred_spikes.npy beside it. "
-            "embed: always embedded, so the HTML is one self-contained file. sidecar: always separate .npy files. "
+            "true: always embed dF/F and inferred spikes in the HTML, so it is one self-contained file. "
+            "false: always write SESSION_dff.npy and SESSION_inferred_spikes.npy beside it. "
+            "Also accepts 1/0 and yes/no, case-insensitive. "
+            "Omit to embed only when each array fits --embed-limit-mb. "
             "With --html-only, an existing reviewer is converted from its embedded data or sidecars, without recomputing."
         ),
     )
@@ -7147,7 +7162,7 @@ def main() -> None:
         "--embed-limit-mb",
         type=float,
         default=None,
-        help=f"Largest encoded size per array, in MB, that --trace-storage auto embeds (default {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)}).",
+        help=f"Largest encoded size per array, in MB, embedded when --force-embed is not given (default {EMBEDDED_DFF_BYTE_LIMIT // (1024 * 1024)}).",
     )
     parser.add_argument(
         "--title",
@@ -7196,7 +7211,7 @@ def main() -> None:
         filter_settings=args.filter_settings,
         html_only=args.html_only,
         title=args.title,
-        trace_storage=args.trace_storage,
+        force_embed=args.force_embed,
         embed_limit_mb=args.embed_limit_mb,
     )
     if _LAST_BUILD_WAS_HTML_ONLY:
