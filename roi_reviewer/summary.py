@@ -2396,6 +2396,12 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-histogram-panel {{ margin-top: 8px; }}
 .info-list {{ margin: 0 0 6px; padding-left: 18px; }}
 .info-list li {{ margin: 2px 0; }}
+details.column-chooser {{ margin-top: 6px; font-size: 13px; }}
+details.column-chooser summary {{ cursor: pointer; color: #175cd3; font-weight: 600; }}
+.column-chooser-actions {{ display: flex; align-items: center; gap: 6px; margin: 6px 0; }}
+.column-chooser-count {{ color: #667085; font-size: 12px; }}
+.column-chooser-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 12px; }}
+.column-chooser-grid label {{ display: flex; align-items: center; gap: 4px; font-size: 13px; }}
 .range-histogram-panel .metric-histogram {{ width: min(100%, 520px); height: 150px; display: block; }}
 .range-label-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
 .labeler-keys {{ font-size: 14px; }}
@@ -2536,7 +2542,6 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
 .metric-table th, .metric-table td {{ border: 1px solid #e5e7eb; padding: 4px 7px; text-align: right; white-space: nowrap; }}
 .metric-table th {{ position: sticky; top: 0; background: #f8fafc; z-index: 1; }}
 .metric-table td:first-child, .metric-table td:nth-child(2), .metric-table td:last-child {{ text-align: left; }}
-.metric-fail {{ background: rgba(248, 113, 113, .28); }}
 .trace-loader {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }}
 .trace-loader input {{ display: none; }}
 .note {{ margin-top: 6px; color: #667085; font-size: 12px; }}
@@ -2796,7 +2801,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div class="save-option">
         <button id="saveMetricSpreadsheet">Export metric spreadsheet CSV</button>
-        <span class="note">Exports one row per ROI with current labels, metrics, current filter failures, and reasons.</span>
+        <span class="note">Exports one row per ROI with the current labels, metrics and the reasons each ROI is excluded, in the columns chosen below.</span>
+        <details class="column-chooser" id="saveColumnChooserDetails"><summary>Choose columns</summary><div id="saveColumnChooser"></div></details>
       </div>
       <div class="save-option">
         <button id="saveManualLabels">Export labels NPY (roi_manual_labels.npy)</button>
@@ -6477,55 +6483,134 @@ function metricSpreadsheetRows() {{
     }};
   }});
 }}
+// One list of spreadsheet columns drives both the viewer table and the CSV, so the two always agree.
+function spreadsheetColumns() {{
+  const base = [
+    ["roi_index", row => row.suite2p],
+    ["manual_QC_label", row => row.label],
+    ["cell_identity_label", row => row.categoryLabel],
+    ["cell_identity_code", row => row.categoryCode ?? ""],
+    ["model_QC_label", row => row.roiModelScoreState],
+    ["model_probability", row => fmt(row.roiModelScoreProbability)],
+    ["footprint", row => fmt(row.footprint)],
+    ["skew", row => fmt(row.skew)],
+    ["aspect_ratio", row => fmt(row.aspect)],
+    ["compact", row => fmt(row.compact)],
+    ["connectivity", row => row.connectivity],
+    ["roi_area_px", row => fmt(row.roiArea)],
+    ["snr_95_50", row => fmt(row.snr9550)],
+    ["caiman_exceptional_event_snr", row => fmt(row.postdocSnr)],
+    ["inferred_spike_snr", row => fmt(row.oasisEventSnr)],
+    ["inferred_spike_rise_tau_seconds", row => fmt(row.oasisRiseTau)],
+    ["inferred_spike_decay_tau_seconds", row => fmt(row.oasisDecayTau)],
+  ].map(([key, get]) => ({{key, get}}));
+  for (const definition of customMetricDefinitions()) {{
+    base.push({{key: `custom_${{definition.key}}`, get: row => fmt(row.customMetrics[definition.key])}});
+    if (definition.categories) base.push({{key: `custom_${{definition.key}}_label`, get: row => customCategoryName(definition, row.customMetrics[definition.key])}});
+  }}
+  base.push({{key: "reason", get: row => row.reason}});
+  return base;
+}}
+// Columns the user has unticked (stored as exclusions so newly added metrics are exported by default).
+// roi_index is always exported so every row can be matched back to its ROI.
+const SPREADSHEET_EXCLUDED_KEY = `roiReviewerSpreadsheetExcluded:${{data.session}}`;
+let spreadsheetExcluded = new Set();
+try {{ spreadsheetExcluded = new Set(JSON.parse(localStorage.getItem(SPREADSHEET_EXCLUDED_KEY) || "[]")); }} catch (error) {{ spreadsheetExcluded = new Set(); }}
+function setSpreadsheetExcluded(keys) {{
+  spreadsheetExcluded = new Set([...keys].filter(key => key !== "roi_index"));
+  try {{ localStorage.setItem(SPREADSHEET_EXCLUDED_KEY, JSON.stringify([...spreadsheetExcluded])); }} catch (error) {{ /* storage unavailable: keep for this page only */ }}
+}}
+function selectedSpreadsheetColumns() {{
+  return spreadsheetColumns().filter(column => column.key === "roi_index" || !spreadsheetExcluded.has(column.key));
+}}
 function metricSpreadsheetCsv(rowsData = metricSpreadsheetRows()) {{
-  const customHeaders = customMetricDefinitions().flatMap(definition => definition.categories ? [`custom_${{definition.key}}`, `custom_${{definition.key}}_label`] : [`custom_${{definition.key}}`]);
-  const csvHeader = ["roi_index","manual_label","cell_identity_label","cell_identity_code","roi_model_score_state","roi_model_score_probability","footprint","skew","aspect_ratio","compact","connectivity","roi_area_px","snr_95_50","caiman_exceptional_event_snr","inferred_spike_snr","inferred_spike_rise_tau_seconds","inferred_spike_decay_tau_seconds", ...customHeaders, "reason"];
-  const csvRows = rowsData.map(row => [
-    row.suite2p, row.label, row.categoryLabel, row.categoryCode ?? "", row.roiModelScoreState, fmt(row.roiModelScoreProbability), fmt(row.footprint), fmt(row.skew), fmt(row.aspect), fmt(row.compact),
-    row.connectivity, fmt(row.roiArea), fmt(row.snr9550), fmt(row.postdocSnr),
-    fmt(row.oasisEventSnr), fmt(row.oasisRiseTau), fmt(row.oasisDecayTau),
-    ...customMetricDefinitions().flatMap(definition => definition.categories
-      ? [fmt(row.customMetrics[definition.key]), customCategoryName(definition, row.customMetrics[definition.key])]
-      : [fmt(row.customMetrics[definition.key])]),
-    row.reason,
-  ].map(csvEscape).join(","));
-  return [csvHeader.join(","), ...csvRows].join("\\n") + "\\n";
+  const columns = selectedSpreadsheetColumns();
+  const lines = rowsData.map(row => columns.map(column => csvEscape(column.get(row))).join(","));
+  return [columns.map(column => column.key).join(","), ...lines].join("\\n") + "\\n";
+}}
+function escapeHtml(value) {{
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({{"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}})[ch]);
+}}
+function labelClass(label) {{
+  return label === "good" ? "label-good" : label === "bad" ? "label-bad" : label === "unsure" ? "label-unsure" : "";
+}}
+function renderSpreadsheetColumnChooser(doc, container, onChange) {{
+  // Checkboxes for every column plus Select all / Deselect all; builds into any document.
+  container.textContent = "";
+  const columns = spreadsheetColumns();
+  const actions = doc.createElement("div");
+  actions.className = "column-chooser-actions";
+  const boxes = [];
+  const sync = () => {{
+    setSpreadsheetExcluded(boxes.filter(box => !box.checked).map(box => box.value));
+    count.textContent = `${{selectedSpreadsheetColumns().length}} of ${{columns.length}} columns selected`;
+    onChange();
+  }};
+  for (const [text, state] of [["Select all", true], ["Deselect all", false]]) {{
+    const button = doc.createElement("button");
+    button.type = "button"; button.textContent = text;
+    button.addEventListener("click", () => {{ boxes.forEach(box => {{ if (!box.disabled) box.checked = state; }}); sync(); }});
+    actions.appendChild(button);
+  }}
+  const count = doc.createElement("span");
+  count.className = "column-chooser-count";
+  actions.appendChild(count);
+  container.appendChild(actions);
+  const grid = doc.createElement("div");
+  grid.className = "column-chooser-grid";
+  for (const column of columns) {{
+    const label = doc.createElement("label");
+    const box = doc.createElement("input");
+    box.type = "checkbox"; box.value = column.key;
+    box.checked = column.key === "roi_index" || !spreadsheetExcluded.has(column.key);
+    if (column.key === "roi_index") {{ box.disabled = true; label.title = "Always exported, so each row can be matched to its ROI"; }}
+    box.addEventListener("change", sync);
+    boxes.push(box);
+    label.appendChild(box);
+    label.appendChild(doc.createTextNode(" " + column.key));
+    grid.appendChild(label);
+  }}
+  container.appendChild(grid);
+  count.textContent = `${{selectedSpreadsheetColumns().length}} of ${{columns.length}} columns selected`;
 }}
 function openMetricSpreadsheet() {{
-  function td(value, failed = false) {{
-    return `<td${{failed ? ' class="metric-fail"' : ""}}>${{value}}</td>`;
-  }}
-  function labelTd(label) {{
-    const cls = label === "good" ? "label-good" : label === "bad" ? "label-bad" : label === "unsure" ? "label-unsure" : "";
-    return `<td${{cls ? ` class="${{cls}}"` : ""}}>${{label}}</td>`;
-  }}
   const rowsData = metricSpreadsheetRows();
-  const customHeaders = customMetricDefinitions().map(definition => `<th>custom_${{csvEscape(definition.key)}}</th>` + (definition.categories ? `<th>custom_${{csvEscape(definition.key)}}_label</th>` : "")).join("");
-  const rows = rowsData.map(row => `<tr>${{
-    td(row.suite2p) +
-    labelTd(row.label) +
-    td(row.categoryLabel) +
-    td(row.categoryCode ?? "") +
-    td(row.roiModelScoreState) +
-    td(fmt(row.roiModelScoreProbability), row.fail.roiModelScoreProbability) +
-    td(fmt(row.footprint), row.fail.footprint) +
-    td(fmt(row.skew), row.fail.skew) +
-    td(fmt(row.aspect), row.fail.aspect) +
-    td(fmt(row.compact), row.fail.compact) +
-    td(row.connectivity, row.fail.connectivity) +
-    td(fmt(row.roiArea), row.fail.roiArea) +
-    td(fmt(row.snr9550), row.fail.snr9550) +
-    td(fmt(row.postdocSnr), row.fail.postdocSnr) +
-    td(fmt(row.oasisEventSnr), row.fail.oasisEventSnr) +
-    td(fmt(row.oasisRiseTau), row.fail.oasisRiseTau) +
-    td(fmt(row.oasisDecayTau), row.fail.oasisDecayTau) +
-    customMetricDefinitions().map(definition => td(fmt(row.customMetrics[definition.key]), row.fail.customMetrics[definition.key]) + (definition.categories ? td(customCategoryName(definition, row.customMetrics[definition.key])) : "")).join("") +
-    td(row.reason)
-  }}</tr>`).join("");
-  const csv = metricSpreadsheetCsv(rowsData);
   const win = window.open("", "_blank");
-  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:8px 0 12px;padding:6px 10px}}.metric-table-wrap{{max-height:80vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}.metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}.metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td:nth-child(1),.metric-table td:nth-child(2),.metric-table td:nth-child(3),.metric-table td:nth-child(4),.metric-table td:nth-child(5),.metric-table td:last-child{{text-align:left}}.metric-fail,.label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}</style><h1>${{data.session}} ROI metric spreadsheet</h1><p>filter_set: ${{loadedFilterSetName() || "none"}}</p><p>cell_identity_label_source: ${{data.cellTypeLabelSource || "not loaded"}}</p><p>roi_model_score_label_source: ${{data.roiModelLabelSource || "not loaded"}}</p><p>roi_model_score_source: ${{data.roiModelScoreSource || "not loaded"}}</p><button id="downloadCsv">Download CSV</button><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>roi_index</th><th>manual_label</th><th>cell_identity_label</th><th>cell_identity_code</th><th>roi_model_score_state</th><th>roi_model_score_probability</th><th>footprint</th><th>skew</th><th>aspect_ratio</th><th>compact</th><th>connectivity</th><th>roi_area_px</th><th>snr_95_50</th><th>caiman_exceptional_event_snr</th><th>inferred_spike_snr</th><th>inferred_spike_rise_tau_seconds</th><th>inferred_spike_decay_tau_seconds</th>${{customHeaders}}<th>reason</th></tr></thead><tbody>${{rows}}</tbody></table></div><script>const csv = ${{JSON.stringify(csv)}}; document.getElementById("downloadCsv").addEventListener("click", () => {{ const blob = new Blob([csv], {{type: "text/csv"}}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "${{data.session}}_roi_metric_spreadsheet.csv"; a.click(); URL.revokeObjectURL(a.href); }});<\\/script>`);
+  if (!win) return;
+  const style = "body{{font-family:Arial,sans-serif;margin:20px}}button{{margin:0 6px 0 0;padding:5px 10px}}"
+    + ".toolbar{{display:flex;align-items:center;gap:10px;margin:8px 0 12px}}.legend span{{display:inline-block;padding:2px 8px;margin-right:4px;border-radius:3px;font-size:12px}}"
+    + "details.column-chooser{{margin:0 0 12px;border:1px solid #d0d5dd;border-radius:6px;padding:6px 10px}}details.column-chooser summary{{cursor:pointer;font-weight:600}}"
+    + ".column-chooser-actions{{display:flex;align-items:center;gap:6px;margin:8px 0}}.column-chooser-count{{color:#667085;font-size:12px}}"
+    + ".column-chooser-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:2px 12px;font-size:13px}}"
+    + ".metric-table-wrap{{max-height:75vh;overflow:auto;border:1px solid #d0d5dd}}.metric-table{{border-collapse:collapse;width:100%;font-size:12px}}"
+    + ".metric-table th,.metric-table td{{border:1px solid #e5e7eb;padding:4px 7px;text-align:right;white-space:nowrap}}"
+    + ".metric-table th{{position:sticky;top:0;background:#f8fafc;z-index:1}}.metric-table td.text{{text-align:left}}"
+    + ".label-bad{{background:rgba(248,113,113,.28)}}.label-good{{background:rgba(34,197,94,.28)}}.label-unsure{{background:rgba(250,204,21,.28)}}";
+  win.document.write(`<!doctype html><title>${{data.session}} ROI metrics</title><style>${{style}}</style><h1>${{data.session}} ROI metric spreadsheet</h1>`
+    + `<div class="toolbar"><button id="downloadCsv">Download CSV</button><span class="legend">Rows are colored by the current manual QC label: <span class="label-good">good</span><span class="label-bad">bad</span><span class="label-unsure">unsure</span><span>not labeled</span></span></div>`
+    + `<details class="column-chooser"><summary>Columns to show and export</summary><div id="columnChooser"></div></details>`
+    + `<div class="metric-table-wrap"><table class="metric-table"><thead></thead><tbody></tbody></table></div>`);
   win.document.close();
+  const doc = win.document;
+  const textColumns = new Set(["manual_QC_label", "cell_identity_label", "model_QC_label", "reason"]);
+  const render = () => {{
+    const columns = selectedSpreadsheetColumns();
+    doc.querySelector("thead").innerHTML = "<tr>" + columns.map(column => `<th>${{escapeHtml(column.key)}}</th>`).join("") + "</tr>";
+    doc.querySelector("tbody").innerHTML = rowsData.map(row => {{
+      const cls = labelClass(row.label);
+      return `<tr${{cls ? ` class="${{cls}}"` : ""}}>` + columns.map(column => `<td${{textColumns.has(column.key) || column.key.endsWith("_label") ? ' class="text"' : ""}}>${{escapeHtml(column.get(row))}}</td>`).join("") + "</tr>";
+    }}).join("");
+  }};
+  renderSpreadsheetColumnChooser(doc, doc.getElementById("columnChooser"), render);
+  render();
+  doc.getElementById("downloadCsv").addEventListener("click", () => {{
+    const blob = new win.Blob([metricSpreadsheetCsv(rowsData)], {{type: "text/csv"}});
+    const link = doc.createElement("a");
+    link.href = win.URL.createObjectURL(blob);
+    link.download = `${{data.session}}_roi_metric_spreadsheet.csv`;
+    doc.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => win.URL.revokeObjectURL(link.href), 1000);
+  }});
 }}
 function customCategoryName(definition, value) {{
   if (!definition.categories || value === null || value === undefined || !Number.isFinite(Number(value))) return "";
@@ -6666,6 +6751,9 @@ function importPresetObject(payload, fallbackName = "") {{
 document.getElementById("saveManualLabels").addEventListener("click", saveManualLabels);
 document.getElementById("saveHtmlWithLabels").addEventListener("click", saveHtmlWithLabels);
 document.getElementById("saveMetricSpreadsheet").addEventListener("click", saveMetricSpreadsheet);
+document.getElementById("saveColumnChooserDetails").addEventListener("toggle", event => {{
+  if (event.target.open) renderSpreadsheetColumnChooser(document, document.getElementById("saveColumnChooser"), () => {{}});
+}});
 document.getElementById("saveCurrentFilters").addEventListener("click", saveCurrentFilters);
 const saveLabelsDialog = document.getElementById("saveLabelsDialog");
 const saveLabelsHelp = document.getElementById("saveLabelsHelp");
