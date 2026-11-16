@@ -2390,6 +2390,10 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-label-row {{ display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(90px, auto) auto; gap: 8px; align-items: end; font-size: 14px; color: #475467; }}
 .range-label-row input, .range-label-row select {{ display: block; width: 100%; margin-top: 3px; box-sizing: border-box; }}
 .range-label-row .range-count {{ color: #667085; font-size: 13px; padding-bottom: 6px; }}
+.range-label-row {{ padding: 4px 6px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }}
+.range-label-row.active {{ border-color: #7c3aed; background: #faf5ff; }}
+.range-histogram-panel {{ margin-top: 8px; }}
+.range-histogram-panel .metric-histogram {{ width: 100%; }}
 .range-label-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
 .labeler-keys {{ font-size: 14px; }}
 .source-heading {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
@@ -2564,7 +2568,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Each plot is a histogram of that metric across all ROIs, with solid green and red lines at thresholds you have entered and dashed gray lines at the starting value (in parentheses) of fields that are not used. Drag a green, red or gray line to set that threshold, with the counts below the min, between and above the max shown under the plot; drag elsewhere to move the purple line, which reports a value's percentile, and open <strong>Summary statistics</strong> for the quartiles and range.</p>
+        <p>Each plot is a histogram of that metric across all ROIs, with the mean marked by a dark dotted line, the 25th and 75th percentiles by dashed gray lines, and thresholds you have entered by solid green (min) and red (max) lines, with the counts below the min, between and above the max shown under the plot. Select and drag the 25th or 75th percentile line to turn it into a min or max and adjust it, double-click a green or red line to remove it (the same as leaving the field empty, Not Used), and click elsewhere on the plot for a purple line that reports a value&apos;s percentile.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
@@ -2594,7 +2598,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div class="filter-controls" id="modelScoreFilterControls">
         <label>ROI model probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" aria-label="ROI model probability distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>ROI model probability</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" aria-label="ROI model probability distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="model_derived"></div>
       </div>
@@ -2626,16 +2630,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls">
         <label>Aspect min <span class="threshold-default" id="aspectMinDefault"></span><input id="aspectMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Aspect max <span class="threshold-default" id="aspectMaxDefault"></span><input id="aspectMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="aspect" data-min="aspectMin" data-max="aspectMax" aria-label="Aspect ratio distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Aspect ratio</summary><canvas class="metric-histogram" data-metric="aspect" data-min="aspectMin" data-max="aspectMax" aria-label="Aspect ratio distribution"></canvas></details>
         <label>Compact min <span class="threshold-default" id="compactMinDefault"></span><input id="compactMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Compact max <span class="threshold-default" id="compactMaxDefault"></span><input id="compactMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="compact" data-min="compactMin" data-max="compactMax" aria-label="Compactness distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Compactness</summary><canvas class="metric-histogram" data-metric="compact" data-min="compactMin" data-max="compactMax" aria-label="Compactness distribution"></canvas></details>
         <label>Connectivity max <span class="threshold-default" id="maxConnectDefault"></span><input id="maxConnect" type="number" min="0" step="1" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="connectivity" data-max="maxConnect" aria-label="Connectivity distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Connectivity</summary><canvas class="metric-histogram" data-metric="connectivity" data-max="maxConnect" aria-label="Connectivity distribution"></canvas></details>
         <label>ROI area min (px) <span class="threshold-default" id="roiAreaMinDefault"></span><input id="roiAreaMin" type="number" min="0" step="1" placeholder="Not Used"></label>
         <label>ROI area max (px) <span class="threshold-default" id="roiAreaMaxDefault"></span><input id="roiAreaMax" type="number" min="0" step="1" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="roi_area" data-min="roiAreaMin" data-max="roiAreaMax" aria-label="ROI area distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>ROI area</summary><canvas class="metric-histogram" data-metric="roi_area" data-min="roiAreaMin" data-max="roiAreaMax" aria-label="ROI area distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="morphology"></div>
       <div class="filter-subsection-title source-heading">
@@ -2649,13 +2653,13 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls">
         <label>Skew min <span class="threshold-default" id="skewMinDefault"></span><input id="skewMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Skew max <span class="threshold-default" id="skewMaxDefault"></span><input id="skewMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="skew" data-min="skewMin" data-max="skewMax" aria-label="Skew distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Skew</summary><canvas class="metric-histogram" data-metric="skew" data-min="skewMin" data-max="skewMax" aria-label="Skew distribution"></canvas></details>
         <label>SNR: 95/50 percentile min <span class="threshold-default" id="eventSnrDefault"></span><input id="eventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="snr_95_50" data-min="eventSnrMin" aria-label="SNR 95/50 percentile distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>SNR 95/50 percentile</summary><canvas class="metric-histogram" data-metric="snr_95_50" data-min="eventSnrMin" aria-label="SNR 95/50 percentile distribution"></canvas></details>
         <label>SNR: CaImAn (large-transient score) min <span class="threshold-default" id="andreaPostdocSnrDefault"></span><input id="andreaPostdocSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="andrea_postdoc_snr" data-min="andreaPostdocSnrMin" aria-label="CaImAn SNR distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>CaImAn SNR</summary><canvas class="metric-histogram" data-metric="andrea_postdoc_snr" data-min="andreaPostdocSnrMin" aria-label="CaImAn SNR distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="fluorescence"></div>
       <div class="filter-subsection-title source-heading">
@@ -2669,13 +2673,13 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls">
         <label>Inferred spike SNR min <span class="threshold-default" id="oasisEventSnrDefault"></span><input id="oasisEventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
         <span></span>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_event_snr" data-min="oasisEventSnrMin" aria-label="Inferred spike SNR distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Inferred spike SNR</summary><canvas class="metric-histogram" data-metric="oasis_event_snr" data-min="oasisEventSnrMin" aria-label="Inferred spike SNR distribution"></canvas></details>
         <label>Inferred spike rise tau min (s) <span class="threshold-default" id="oasisRiseTauMinDefault"></span><input id="oasisRiseTauMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Inferred spike rise tau max (s) <span class="threshold-default" id="oasisRiseTauMaxDefault"></span><input id="oasisRiseTauMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_rise_tau_seconds" data-min="oasisRiseTauMin" data-max="oasisRiseTauMax" aria-label="Inferred spike rise tau distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Inferred spike rise tau</summary><canvas class="metric-histogram" data-metric="oasis_rise_tau_seconds" data-min="oasisRiseTauMin" data-max="oasisRiseTauMax" aria-label="Inferred spike rise tau distribution"></canvas></details>
         <label>Inferred spike decay tau min (s) <span class="threshold-default" id="oasisDecayTauMinDefault"></span><input id="oasisDecayTauMin" type="number" step="0.01" placeholder="Not Used"></label>
         <label>Inferred spike decay tau max (s) <span class="threshold-default" id="oasisDecayTauMaxDefault"></span><input id="oasisDecayTauMax" type="number" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>Distribution</summary><canvas class="metric-histogram" data-metric="oasis_decay_tau_seconds" data-min="oasisDecayTauMin" data-max="oasisDecayTauMax" aria-label="Inferred spike decay tau distribution"></canvas></details>
+        <details class="metric-histogram-panel" open><summary>Inferred spike decay tau</summary><canvas class="metric-histogram" data-metric="oasis_decay_tau_seconds" data-min="oasisDecayTauMin" data-max="oasisDecayTauMax" aria-label="Inferred spike decay tau distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="inferred_spike"></div>
       <div class="filter-subsection-title">Save Filter Sets</div>
@@ -2822,7 +2826,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
         </div>
         <div id="rangeLabelHelp" class="info-box" hidden>
-          <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds; ROIs outside every range are left unchanged. <strong>Review labels</strong> sets Good, Bad, Unsure or Not labeled directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric.</p>
+          <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds, and leaves ROIs outside every range unchanged; <strong>Review labels</strong> sets Good, Bad, Unsure or Not labeled directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric. The plot works as in the Filter menu for the selected (highlighted) range: drag the dashed 25th or 75th percentile line to set its min or max, double-click a set line to remove it, and the other ranges are shaded in their label&apos;s color.</p>
           <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#assigning-labels-to-metric-ranges" target="_blank" rel="noopener noreferrer">Range labels in full</a></p>
         </div>
         <div class="range-label-controls">
@@ -2830,6 +2834,9 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <label>Assign <select id="rangeLabelMode"><option value="gbu">Review labels</option><option value="variable">New variable</option></select></label>
           <label id="rangeLabelVariableNameLabel" hidden>Variable name <input id="rangeLabelVariableName" type="text" placeholder="e.g. score_class"></label>
           <label id="rangeLabelOnlyUnlabeledLabel" class="inline-check"><input id="rangeLabelOnlyUnlabeled" type="checkbox"> Only change ROIs that are not labeled</label>
+        </div>
+        <div class="metric-histogram-panel range-histogram-panel">
+          <canvas class="metric-histogram" id="rangeLabelHistogram" data-metric="" data-min="" data-max="" aria-label="Distribution of the range metric, with the selected range's min and max"></canvas>
         </div>
         <div id="rangeLabelRows" class="range-label-rows"></div>
         <div class="range-label-actions">
@@ -2921,8 +2928,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
               </div>
                 <div class="summary-section summary-rate">
                   <div class="gbu-plot-head">
-                    <div class="gbu-plot-title" id="gbuRateTitle">Firing rate</div>
-                    <div class="rate-toggle" role="group" aria-label="Firing rate view"><button type="button" data-rate-mode="label" aria-pressed="true">By label</button><button type="button" data-rate-mode="roi" aria-pressed="false">Selected ROI</button></div>
+                    <div class="gbu-plot-title" id="gbuRateTitle">Firing rate by label</div>
+                    
                   </div>
                   <div class="canvas-box"><canvas id="gbuRateCanvas"></canvas></div>
                 </div>
@@ -3369,7 +3376,7 @@ function setOasisThreshold(value, redraw = true) {{
   const next = Number.isFinite(value) ? value : fallback;
   oasisEventThreshold = Math.min(Math.max(next, oasisSpikeMin), oasisSpikeMax);
   configureOasisThresholdControls();
-  if (redraw) {{ drawSelectedTraceAndOasis(); if (gbuRateMode === "roi") scheduleGbuSummaryDraw(); }}
+  if (redraw) drawSelectedTraceAndOasis();
   syncThresholdMenu();
   updateThresholdButton();
 }}
@@ -3904,7 +3911,7 @@ function renderCustomMetricControls() {{
     details.className = "metric-histogram-panel";
     details.open = true;
     const summary = document.createElement("summary");
-    summary.textContent = "Distribution";
+    summary.textContent = definition.label;
     const canvas = document.createElement("canvas");
     canvas.className = "metric-histogram";
     canvas.dataset.metric = `custom:${{definition.key}}`;
@@ -4018,9 +4025,10 @@ function spikeTrace(roi) {{
   return oasisSpikes.subarray(roi * data.nFrames, (roi + 1) * data.nFrames);
 }}
 if (data.oasisAvailable) {{
-  document.getElementById("traceOasisControls").classList.add("visible");
+  // Show Inferred Spikes and the threshold menu appear once the spike array is in memory.
   if (data.oasisStorageMode === "embedded" && data.oasisSpikes) {{
     oasisSpikes = b64f32(data.oasisSpikes);
+    document.getElementById("traceOasisControls").classList.add("visible");
     configureOasisThresholdControls();
   }} else {{
     configureOasisThresholdControls();
@@ -4277,7 +4285,7 @@ function bindHistogramProbe(canvas) {{
   canvas._probeBound = true;
   canvas.style.touchAction = "none";
   canvas.style.cursor = "crosshair";
-  canvas.title = "Drag a min/max line to set that threshold; drag elsewhere to read off a value's percentile; double-click to reset the purple line";
+  canvas.title = "Drag a dashed quartile line to set a min or max; drag a set line to adjust it; double-click a set line to remove it (Not Used); click elsewhere for a value's percentile";
   const canvasX = event => {{
     const rect = canvas.getBoundingClientRect();
     return (event.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
@@ -4327,29 +4335,52 @@ function bindHistogramProbe(canvas) {{
   }};
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("dblclick", () => {{ canvas._probeValue = undefined; drawMetricHistogram(canvas); }});
+  canvas.addEventListener("dblclick", event => {{
+    // Double-click on a set min/max line clears that field (Not Used); elsewhere it hides the purple line.
+    const r = window.devicePixelRatio || 1, x = canvasX(event);
+    let best = null;
+    for (const line of canvas._thresholdLines || []) {{
+      const input = document.getElementById(line.inputId);
+      if (!line.active || !input || input.disabled) continue;
+      const d = Math.abs(line.x - x);
+      if (d <= 8 * r && (!best || d < best.d)) best = {{d, input}};
+    }}
+    if (best) {{
+      best.input.value = "";
+      best.input.dispatchEvent(new Event("input", {{bubbles: true}}));
+      best.input.dispatchEvent(new Event("change", {{bubbles: true}}));
+    }} else {{
+      canvas._probeValue = undefined;
+    }}
+    drawMetricHistogram(canvas);
+  }});
 }}
 function drawHistogramProbe(canvas, ctx, values, scale) {{
   const {{readout, thresholds, table}} = histogramExtras(canvas);
   if (!values.length) {{ readout.textContent = ""; thresholds.textContent = ""; table.innerHTML = ""; canvas._probeScale = null; return; }}
   const sorted = values.slice().sort((a, b) => a - b);
   const n = sorted.length;
-  if (canvas._probeMetric !== canvas.dataset.metric || !Number.isFinite(canvas._probeValue)) {{
+  if (canvas._probeMetric !== canvas.dataset.metric) {{
     canvas._probeMetric = canvas.dataset.metric;
-    canvas._probeValue = percentile(sorted, 0.5);
+    canvas._probeValue = undefined;
   }}
   canvas._probeScale = scale;
   const value = canvas._probeValue;
+  const showProbe = Number.isFinite(value);
   const {{lo, hi, pad, plotW, plotTop, plotBottom, r}} = scale;
   const x = pad + Math.min(1, Math.max(0, (value - lo) / (hi - lo))) * plotW;
-  ctx.save();
-  ctx.strokeStyle = "#7c3aed"; ctx.fillStyle = "#7c3aed"; ctx.lineWidth = Math.max(1.5, 1.2 * r);
-  ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom); ctx.stroke();
-  ctx.beginPath(); ctx.arc(x, plotBottom, 3.5 * r, 0, 2 * Math.PI); ctx.fill();
-  ctx.restore();
-  const below = countBelow(sorted, value), above = n - below;
-  const pct = 100 * below / n;
-  readout.textContent = `Purple line at ${{fmt(value)}}: percentile ${{pct.toFixed(1)}}, ${{below.toLocaleString()}} ROIs below and ${{above.toLocaleString()}} at or above`;
+  if (showProbe) {{
+    ctx.save();
+    ctx.strokeStyle = "#7c3aed"; ctx.fillStyle = "#7c3aed"; ctx.lineWidth = Math.max(1.5, 1.2 * r);
+    ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, plotBottom, 3.5 * r, 0, 2 * Math.PI); ctx.fill();
+    ctx.restore();
+    const below = countBelow(sorted, value), above = n - below;
+    const pct = 100 * below / n;
+    readout.textContent = `Purple line at ${{fmt(value)}}: percentile ${{pct.toFixed(1)}}, ${{below.toLocaleString()}} ROIs below and ${{above.toLocaleString()}} at or above`;
+  }} else {{
+    readout.textContent = "Click the plot away from the lines to read off a value\u2019s percentile.";
+  }}
   // ROIs below the min, between, and above the max, for the thresholds currently entered
   const minValue = canvas.dataset.min ? filterValue(canvas.dataset.min) : NaN;
   const maxValue = canvas.dataset.max ? filterValue(canvas.dataset.max) : NaN;
@@ -4385,8 +4416,12 @@ function drawMetricHistogram(canvas) {{
     return;
   }}
   const r = window.devicePixelRatio || 1;
-  ctx.fillStyle = "#344054"; ctx.font = `${{11 * r}}px Arial`; ctx.textAlign = "left";
-  ctx.fillText(metricLabel(metric), pad, 12 * r);
+  // The metric's name is the panel title above the plot, so it is not repeated on the canvas.
+  const sortedValues = values.slice().sort((a, b) => a - b);
+  let distinct = 0;
+  for (let i = 0; i < sortedValues.length && distinct <= 5; i++) if (i === 0 || sortedValues[i] !== sortedValues[i - 1]) distinct++;
+  const numeric = distinct > 5;  // categorical or near-categorical metrics get no mean or quartile lines
+  const meanValue = mean(sortedValues), q25 = percentile(sortedValues, 0.25), q75 = percentile(sortedValues, 0.75);
   let lo = percentile(values, 0.01), hi = percentile(values, 0.99);
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {{ lo = Math.min(...values); hi = Math.max(...values); }}
   if (hi <= lo) hi = lo + 1;
@@ -4396,8 +4431,14 @@ function drawMetricHistogram(canvas) {{
     counts[bin]++;
   }});
   const maxCount = Math.max(...counts, 1);
-  const plotW = w - pad * 2, plotTop = 32 * r, plotBottom = h - pad * 1.45;
+  const plotW = w - pad * 2, plotTop = 22 * r, plotBottom = h - pad * 1.45;
   const plotH = Math.max(1, plotBottom - plotTop);
+  // Shaded ranges supplied by the caller (the bulk labeling menu shades its other ranges).
+  for (const band of canvas._bands || []) {{
+    const x0b = pad + Math.min(1, Math.max(0, ((band.lo ?? lo) - lo) / (hi - lo))) * plotW;
+    const x1b = pad + Math.min(1, Math.max(0, ((band.hi ?? hi) - lo) / (hi - lo))) * plotW;
+    if (x1b > x0b) {{ ctx.fillStyle = band.color; ctx.fillRect(x0b, plotTop, x1b - x0b, plotBottom - plotTop); }}
+  }}
   ctx.fillStyle = "#111827";
   counts.forEach((count, index) => {{
     const x = pad + index / bins * plotW;
@@ -4415,6 +4456,11 @@ function drawMetricHistogram(canvas) {{
     const activeValue = filterValue(inputId);
     if (Number.isFinite(activeValue)) {{
       return {{value: activeValue, active: true, bound, color: bound === "min" ? "#16a34a" : "#dc2626", text: `${{bound}} ${{fmt(activeValue)}}`}};
+    }}
+    // A field that is not used is drawn at the 25th (min) or 75th (max) percentile, ready to drag.
+    if (numeric) {{
+      const q = bound === "min" ? q25 : q75;
+      return {{value: q, active: false, bound, color: "#667085", text: `${{bound === "min" ? "25th" : "75th"}} pctl ${{fmt(q)}}`}};
     }}
     const referenceValue = referenceStatistics[inputId];
     if (!Number.isFinite(referenceValue)) return null;
@@ -4449,7 +4495,7 @@ function drawMetricHistogram(canvas) {{
       if (a.left + a.width + 4 * r > b.left) b.y = labelY + 11 * r;  // still crowded: drop the second label a row
     }}
   }}
-  canvas._thresholdLines = placed.map(p => ({{x: p.x, inputId: p.bound === "min" ? canvas.dataset.min : canvas.dataset.max}}));
+  canvas._thresholdLines = placed.map(p => ({{x: p.x, active: p.active, inputId: p.bound === "min" ? canvas.dataset.min : canvas.dataset.max}}));
   for (const p of placed) {{
     ctx.strokeStyle = p.color; ctx.lineWidth = Math.max(p.active ? 2 : 1.5, (p.active ? 1.5 : 1.2) * r);
     ctx.setLineDash(p.active ? [] : [4 * r, 3 * r]);
@@ -4459,6 +4505,26 @@ function drawMetricHistogram(canvas) {{
     if (p.y) {{ ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(p.left - 1, y - 9 * r, p.width + 2, 11 * r); }}
     ctx.fillStyle = p.color; ctx.textAlign = "left";
     ctx.fillText(p.text, p.left, y);
+  }}
+  // Reference lines: the mean, and any quartile not already drawn as an unused min/max handle.
+  if (numeric) {{
+    const handleAt = bound => placed.some(p => p.bound === bound && !p.active);
+    const refs = [{{value: meanValue, text: "mean", dash: [2 * r, 2 * r], color: "#1d2939"}}];
+    if (!handleAt("min")) refs.push({{value: q25, text: "25th", dash: [1 * r, 3 * r], color: "#98a2b3"}});
+    if (!handleAt("max")) refs.push({{value: q75, text: "75th", dash: [1 * r, 3 * r], color: "#98a2b3"}});
+    const taken = [];
+    for (const ref of refs) {{
+      if (!Number.isFinite(ref.value) || ref.value < lo || ref.value > hi) continue;
+      const x = pad + (ref.value - lo) / (hi - lo) * plotW;
+      ctx.strokeStyle = ref.color; ctx.lineWidth = Math.max(1, 1 * r); ctx.setLineDash(ref.dash);
+      ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = `${{9 * r}}px Arial`;
+      const tw = ctx.measureText(ref.text).width, left = Math.min(pad + plotW - tw, Math.max(pad, x + 2 * r));
+      if (taken.some(([a, b]) => left < b + 3 * r && left + tw > a - 3 * r)) continue;
+      taken.push([left, left + tw]);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left - 1, plotTop + 1 * r, tw + 2, 10 * r);
+      ctx.fillStyle = ref.color; ctx.textAlign = "left"; ctx.fillText(ref.text, left, plotTop + 9 * r);
+    }}
   }}
   ctx.restore();
   const binSize = (hi - lo) / bins;
@@ -5751,7 +5817,7 @@ var gbuRoiStats = null;
 var gbuGeneration = 0;
 var gbuProgress = 0;
 var gbuDrawPending = false;
-var gbuRateMode = "label";  // "label": rate distribution per label; "roi": selected ROI over time
+var gbuRateMode = "label";  // firing rate is shown by label only
 function gbuDefaultThreshold(roi) {{ return defaultThresholdFor(roi); }}
 function thresholdEvents(roi, threshold) {{
   // Event frames exactly as in selectedOasisDiagnostics, without the waveform and decay fit.
@@ -5893,48 +5959,6 @@ function gbuKde(values, grid) {{
     return s * norm;
   }});
 }}
-function drawSelectedRoiRate(rc) {{
-  // Firing rate of the selected ROI in time bins across the session, from inferred spikes above the
-  // current amplitude threshold (the dashed line is its mean rate over the whole session).
-  if (!data.oasisAvailable || !dff || !oasisSpikes) {{
-    gbuEmptyPlot(rc, "Time (s)", "Events/s", "Load inferred spikes file to view the selected ROI's firing rate over time");
-    return;
-  }}
-  const d = selectedOasisDiagnostics(selected, oasisEventThreshold);
-  const events = d ? d.events : [];
-  const seconds = Math.max(1 / data.frameRate, data.nFrames / data.frameRate);
-  const bin = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200].find(s => seconds / s <= 60) || 1800;
-  const nb = Math.max(1, Math.ceil(seconds / bin));
-  const counts = new Array(nb).fill(0);
-  for (const frame of events) counts[Math.min(nb - 1, Math.floor(frame / data.frameRate / bin))] += 1;
-  const rates = counts.map((count, k) => count / Math.max(1e-9, Math.min(bin, seconds - k * bin)));
-  const meanRate = events.length / seconds;
-  const minutes = seconds > 600, unit = minutes ? 60 : 1;
-  let yMax = Math.max(meanRate, ...rates) * 1.35;
-  if (!(yMax > 0)) yMax = 1;
-  const ctx = rc.ctx, r = rc.r;
-  const l = 46 * r, rr = 8 * r, t = 8 * r, b = 32 * r, pw = rc.w - l - rr, ph = rc.h - t - b;
-  const xMax = seconds / unit;
-  const xOf = x => l + x / xMax * pw, yOf = y => t + (1 - y / yMax) * ph;
-  drawAxes(ctx, rc.w, rc.h, l, t, pw, ph, `Time (${{minutes ? "min" : "s"}})`, "Events/s", {{ xLabelY: rc.h - 4 * r, yLabelX: 10 * r }});
-  drawNumericTicks(ctx, l, t, pw, ph, 0, xMax, 0, yMax, 5, 3);
-  ctx.save();
-  ctx.strokeStyle = "#7c3aed"; ctx.lineWidth = 1.5 * r; ctx.beginPath();
-  rates.forEach((rate, k) => {{
-    const x0 = xOf(k * bin / unit), x1 = xOf(Math.min(seconds, (k + 1) * bin) / unit), y = yOf(rate);
-    if (k === 0) ctx.moveTo(x0, y); else ctx.lineTo(x0, y);
-    ctx.lineTo(x1, y);
-  }});
-  ctx.stroke();
-  ctx.setLineDash([4 * r, 3 * r]); ctx.strokeStyle = "#344054"; ctx.lineWidth = 1 * r;
-  ctx.beginPath(); ctx.moveTo(l, yOf(meanRate)); ctx.lineTo(l + pw, yOf(meanRate)); ctx.stroke();
-  ctx.restore();
-  ctx.font = `${{11 * r}}px Arial`; ctx.textAlign = "right"; ctx.textBaseline = "top";
-  ctx.fillStyle = "#7c3aed";
-  ctx.fillText(`${{ROI_INDEX_LABEL}} ${{data.suite2pIndices[selected]}}, ${{bin}} s bins`, l + pw - 4 * r, t + 4 * r);
-  ctx.fillStyle = "#344054";
-  ctx.fillText(`Mean ${{meanRate.toPrecision(3)}}/s (${{events.length.toLocaleString()}} spikes above ${{fmt(oasisEventThreshold)}})`, l + pw - 4 * r, t + 18 * r);
-}}
 function gbuEmptyPlot(c, xLabel, yLabel, text) {{
   // Axes drawn before the data exist, so the plot's place and scale are visible, with a centered
   // gray message (wrapped to the plot width) saying what is needed to fill it.
@@ -5986,7 +6010,6 @@ function drawGbuSummary() {{
   const tc = gbuTransientMode === "label" ? gbuCanvas("gbuTransientCanvas") : null;
   if (gbuTransientMode === "roi") drawOasisDiagnostics();
   const rc = gbuCanvas("gbuRateCanvas");
-  if (rc && gbuRateMode === "roi") drawSelectedRoiRate(rc);
   const spikesMissing = !data.oasisAvailable || !dff || !oasisSpikes;
   const ready = Array.isArray(gbuRoiStats);
   if (note) {{
@@ -6144,6 +6167,7 @@ const labelAllDialog = document.getElementById("labelAllDialog");
 document.getElementById("openLabelAllDialog").addEventListener("click", () => {{
   if (typeof labelAllDialog.showModal === "function") labelAllDialog.showModal();
   else labelAllDialog.setAttribute("open", "");
+  requestAnimationFrame(drawRangeHistogram);
 }});
 document.getElementById("closeLabelAllDialog").addEventListener("click", () => {{
   closeDialog(labelAllDialog);
@@ -6685,13 +6709,7 @@ document.getElementById("toggleSideMenu").addEventListener("click", () => {{
 startGbuSummary();
 document.getElementById("summaryHide")?.addEventListener("click", () => setGbuSummaryVisible(false));
 document.getElementById("summaryShow")?.addEventListener("click", () => setGbuSummaryVisible(true));
-document.querySelectorAll("[data-rate-mode]").forEach(button => {{
-  button.addEventListener("click", () => {{
-    gbuRateMode = button.dataset.rateMode;
-    document.querySelectorAll("[data-rate-mode]").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
-    scheduleGbuSummaryDraw();
-  }});
-}});
+
 document.querySelectorAll("[data-transient-mode]").forEach(button => {{
   button.addEventListener("click", () => {{
     gbuTransientMode = button.dataset.transientMode;
@@ -6813,15 +6831,21 @@ function refreshRangeMetricOptions() {{
 function rangeLabelMode() {{
   return document.getElementById("rangeLabelMode").value;
 }}
+var rangeRowCounter = 0;
+var activeRangeRow = null;
 function addRangeLabelRow(min = "", max = "", target = "") {{
   const rows = document.getElementById("rangeLabelRows");
   const row = document.createElement("div");
   row.className = "range-label-row";
+  rangeRowCounter += 1;
+  row.addEventListener("focusin", () => setActiveRangeRow(row));
+  row.addEventListener("pointerdown", () => setActiveRangeRow(row));
   const field = (text, cls, value) => {{
     const label = document.createElement("label");
     label.textContent = text;
     const input = document.createElement("input");
     input.type = "number"; input.step = "any"; input.placeholder = "Not Used"; input.className = cls;
+    input.id = `${{cls === "range-min" ? "rangeMin" : "rangeMax"}}${{rangeRowCounter}}`;
     input.value = value === null || value === undefined ? "" : value;
     input.addEventListener("input", updateRangeLabelPreview);
     label.appendChild(input);
@@ -6841,8 +6865,33 @@ function addRangeLabelRow(min = "", max = "", target = "") {{
   remove.addEventListener("click", () => {{ row.remove(); updateRangeLabelPreview(); }});
   row.appendChild(remove);
   rows.appendChild(row);
+  activeRangeRow = row;
   renderRangeTargets();
   updateRangeLabelPreview();
+}}
+const RANGE_BAND_COLORS = {{"1": "rgba(22, 163, 74, 0.16)", "0": "rgba(220, 38, 38, 0.14)", "2": "rgba(234, 170, 8, 0.20)", "-1": "rgba(102, 112, 133, 0.14)"}};
+function setActiveRangeRow(row) {{
+  if (activeRangeRow === row) return;
+  activeRangeRow = row;
+  drawRangeHistogram();
+}}
+function drawRangeHistogram() {{
+  // The Filter menu's distribution plot, with its min/max lines tied to the selected range row.
+  const canvas = document.getElementById("rangeLabelHistogram");
+  if (!canvas || !canvas.getClientRects().length) return;
+  const rows = [...document.querySelectorAll("#rangeLabelRows .range-label-row")];
+  if (!rows.includes(activeRangeRow)) activeRangeRow = rows[rows.length - 1] || null;
+  rows.forEach(row => row.classList.toggle("active", row === activeRangeRow));
+  canvas.dataset.metric = document.getElementById("rangeLabelMetric")?.value || "";
+  canvas.dataset.min = activeRangeRow ? activeRangeRow.querySelector(".range-min").id : "";
+  canvas.dataset.max = activeRangeRow ? activeRangeRow.querySelector(".range-max").id : "";
+  const bound = input => (String(input.value).trim() === "" || !Number.isFinite(Number(input.value))) ? null : Number(input.value);
+  const gbu = rangeLabelMode() === "gbu";
+  canvas._bands = rows.filter(row => row !== activeRangeRow).map(row => ({{
+    lo: bound(row.querySelector(".range-min")), hi: bound(row.querySelector(".range-max")),
+    color: gbu ? (RANGE_BAND_COLORS[String(row.dataset.target)] || RANGE_BAND_COLORS["-1"]) : "rgba(124, 58, 237, 0.12)",
+  }})).filter(band => band.lo !== null || band.hi !== null);
+  drawMetricHistogram(canvas);
 }}
 function renderRangeTargets() {{
   const mode = rangeLabelMode();
@@ -6867,7 +6916,7 @@ function renderRangeTargets() {{
       control.value = ["1", "0", "2", "-1"].includes(String(kept)) ? "" : (kept || "");
     }}
     control.className = "range-target";
-    control.addEventListener("change", () => {{ row.dataset.target = control.value; }});
+    control.addEventListener("change", () => {{ row.dataset.target = control.value; drawRangeHistogram(); }});
     row.dataset.target = control.value;
     holder.appendChild(control);
   }});
@@ -6925,6 +6974,7 @@ function updateRangeLabelPreview() {{
       : "Add a range to start.";
   }}
   if (status) delete status.dataset.sticky;
+  drawRangeHistogram();
 }}
 function fillModelScoreRanges() {{
   const scored = (data.roiModelScores || []).find(entry => entry && Number.isFinite(Number(entry.good_threshold)) && Number.isFinite(Number(entry.bad_threshold)));
@@ -6990,7 +7040,7 @@ function applyRangeLabels() {{
 }}
 function initRangeLabels() {{
   document.getElementById("rangeLabelMetric").addEventListener("change", updateRangeLabelPreview);
-  document.getElementById("rangeLabelMode").addEventListener("change", renderRangeTargets);
+  document.getElementById("rangeLabelMode").addEventListener("change", () => {{ renderRangeTargets(); drawRangeHistogram(); }});
   document.getElementById("addRangeLabelRow").addEventListener("click", () => addRangeLabelRow());
   document.getElementById("fillModelRanges").addEventListener("click", fillModelScoreRanges);
   document.getElementById("applyRangeLabels").addEventListener("click", applyRangeLabels);
