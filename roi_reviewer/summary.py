@@ -2396,7 +2396,7 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-histogram-panel {{ margin-top: 8px; }}
 .info-list {{ margin: 0 0 6px; padding-left: 18px; }}
 .info-list li {{ margin: 2px 0; }}
-.range-histogram-panel .metric-histogram {{ width: 100%; }}
+.range-histogram-panel .metric-histogram {{ width: min(100%, 520px); height: 150px; display: block; }}
 .range-label-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
 .labeler-keys {{ font-size: 14px; }}
 .source-heading {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }}
@@ -2603,7 +2603,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <button class="info-button" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false">Read more</button>
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
-        <p>ROI model probability is the classifier's p(good ROI), loaded from <code>roi_model_scores.h5</code>; the current model was trained on cerebellar dendrite ROIs only. The scores do not label ROIs unless the reviewer was generated with label initialization; use <strong>Assign Labels to Metric Ranges</strong> below to label from them.</p>
+        <p>ROI model probability is a classifier&apos;s per-ROI probability that the ROI is good, loaded from <code>roi_model_scores.h5</code>. The scores do not label ROIs unless the reviewer was generated with label initialization; use the <strong>Bulk labeling menu</strong> to label ROIs from score ranges.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#roi-model-probability" target="_blank" rel="noopener noreferrer">ROI model probability in full</a></p>
       </div>
       <div class="filter-controls" id="modelScoreFilterControls">
@@ -2836,12 +2836,20 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
         </div>
         <div id="rangeLabelHelp" class="info-box" hidden>
-          <p>Labels every ROI whose value of the chosen metric falls in one of the ranges, checked from the top with inclusive bounds, and leaves ROIs outside every range unchanged; <strong>Review labels</strong> sets Good, Bad, Unsure or Not labeled directly, while <strong>New variable</strong> stores each ROI's range number as a new uploaded metric. The plot works as in the Filter menu for the selected (highlighted) range: drag the dashed 25th or 75th percentile line to set its min or max, double-click a set line to remove it, and the other ranges are shaded in their label&apos;s color.</p>
+          <ul class="info-list">
+            <li><strong>What it does:</strong> labels every ROI whose value of the chosen metric falls in one of the ranges below. Ranges are checked from the top with inclusive bounds, and ROIs outside every range are left unchanged.</li>
+            <li><strong>Metric:</strong> any numeric metric in the reviewer, including uploaded ones.</li>
+            <li><strong>Assign good/bad/unsure labels:</strong> sets each matching ROI to Good, Bad, Unsure or Not labeled directly, as the G/B/U keys do. <strong>Only change ROIs that are not labeled</strong> leaves existing labels alone.</li>
+            <li><strong>New variable:</strong> creates a new metric with the name you give, whose value is the number of the matching range (1 for the first, 2 for the second, and so on; blank outside every range), and keeps each range&apos;s name for the exported spreadsheet. It appears under <strong>Uploaded ROI Metrics</strong> in both the <strong>Filter ROIs</strong> menu and the <strong>Sort filtered ROIs</strong> menu, so it can be filtered and sorted like any other metric.</li>
+            <li><strong>Plot:</strong> works as in the Filter menu for the selected (highlighted) range. Drag the dashed 25th or 75th percentile line to set its min or max, double-click a set line to remove it, and the other ranges are shaded in their label&apos;s color.</li>
+            <li><strong>Ranges:</strong> each row has a min, a max (either can be left as Not Used), the label or range name, and the number of ROIs it currently matches. <strong>Add range</strong> adds a row and <strong>Remove</strong> deletes one.</li>
+            <li><strong>Apply:</strong> neither option depends on the Filter menu thresholds or needs Apply Filters.</li>
+          </ul>
           <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#assigning-labels-to-metric-ranges" target="_blank" rel="noopener noreferrer">Range labels in full</a></p>
         </div>
         <div class="range-label-controls">
           <label>Metric <select id="rangeLabelMetric"></select></label>
-          <label>Assign <select id="rangeLabelMode"><option value="gbu">Review labels</option><option value="variable">New variable</option></select></label>
+          <label>Assign <select id="rangeLabelMode"><option value="gbu">Assign good/bad/unsure labels</option><option value="variable">New variable</option></select></label>
           <label id="rangeLabelVariableNameLabel" hidden>Variable name <input id="rangeLabelVariableName" type="text" placeholder="e.g. score_class"></label>
           <label id="rangeLabelOnlyUnlabeledLabel" class="inline-check"><input id="rangeLabelOnlyUnlabeled" type="checkbox"> Only change ROIs that are not labeled</label>
         </div>
@@ -2851,7 +2859,6 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div id="rangeLabelRows" class="range-label-rows"></div>
         <div class="range-label-actions">
           <button id="addRangeLabelRow" type="button">Add range</button>
-          <button id="fillModelRanges" type="button">Use model score thresholds</button>
           <button id="applyRangeLabels" type="button">Assign labels</button>
         </div>
         <div id="rangeLabelStatus" class="note"></div>
@@ -6848,7 +6855,6 @@ function refreshRangeMetricOptions() {{
     select.appendChild(option);
   }}
   if ([...select.options].some(option => option.value === current)) select.value = current;
-  document.getElementById("fillModelRanges").hidden = !finiteMetricValues("roi_model_score_probability").length;
   updateRangeLabelPreview();
 }}
 function rangeLabelMode() {{
@@ -6999,17 +7005,6 @@ function updateRangeLabelPreview() {{
   if (status) delete status.dataset.sticky;
   drawRangeHistogram();
 }}
-function fillModelScoreRanges() {{
-  const scored = (data.roiModelScores || []).find(entry => entry && Number.isFinite(Number(entry.good_threshold)) && Number.isFinite(Number(entry.bad_threshold)));
-  const good = scored ? Number(scored.good_threshold) : 0.85;
-  const bad = scored ? Number(scored.bad_threshold) : 0.15;
-  document.getElementById("rangeLabelMetric").value = "roi_model_score_probability";
-  document.getElementById("rangeLabelMode").value = "gbu";
-  document.getElementById("rangeLabelRows").textContent = "";
-  addRangeLabelRow(good, "", "1");
-  addRangeLabelRow("", bad, "0");
-  addRangeLabelRow(bad, good, "2");
-}}
 function applyRangeLabels() {{
   const metric = document.getElementById("rangeLabelMetric").value;
   const ranges = readRangeLabelRows();
@@ -7065,11 +7060,9 @@ function initRangeLabels() {{
   document.getElementById("rangeLabelMetric").addEventListener("change", updateRangeLabelPreview);
   document.getElementById("rangeLabelMode").addEventListener("change", () => {{ renderRangeTargets(); drawRangeHistogram(); }});
   document.getElementById("addRangeLabelRow").addEventListener("click", () => addRangeLabelRow());
-  document.getElementById("fillModelRanges").addEventListener("click", fillModelScoreRanges);
   document.getElementById("applyRangeLabels").addEventListener("click", applyRangeLabels);
   refreshRangeMetricOptions();
-  if (finiteMetricValues("roi_model_score_probability").length) fillModelScoreRanges();
-  else addRangeLabelRow();
+  addRangeLabelRow();
 }}
 makeOverlays(); syncTimeInputs(); renderCustomMetricControls(); renderCustomSortMetrics(); updateSortMetricHandlers(); updateMetricDefaults(); updateCellTypeLabelStatus(); updateRoiDisplaySummary();
 const initialFilterSet = data.initialFilterSet && (customPresets[data.initialFilterSet] || data.morphologyPresets[data.initialFilterSet]) ? data.initialFilterSet : "all_rois";
