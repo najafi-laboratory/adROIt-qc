@@ -2362,7 +2362,8 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .metric-block .custom-metric-header {{ grid-column: auto; }}
 .metric-block .metric-histogram-panel {{ min-width: 0; }}
 .metric-bounds {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: end; }}
-.metric-bounds label {{ font-size: 13px; }}
+.metric-bounds label {{ font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.metric-bounds label input {{ white-space: normal; }}
 .histogram-threshold-readout {{ font-size: 12px; color: #344054; margin-top: 2px; line-height: 1.3; }}
 .histogram-threshold-readout .excluded {{ color: #b42318; font-weight: 600; }}
 .histogram-threshold-readout .kept {{ color: #067647; font-weight: 600; }}
@@ -2393,6 +2394,8 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-label-row {{ padding: 4px 6px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }}
 .range-label-row.active {{ border-color: #7c3aed; background: #faf5ff; }}
 .range-histogram-panel {{ margin-top: 8px; }}
+.info-list {{ margin: 0 0 6px; padding-left: 18px; }}
+.info-list li {{ margin: 2px 0; }}
 .range-histogram-panel .metric-histogram {{ width: 100%; }}
 .range-label-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
 .labeler-keys {{ font-size: 14px; }}
@@ -2561,14 +2564,21 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div class="source-heading">
         <button class="info-button" type="button" data-info-target="filterSetHelp" aria-expanded="false">Read more: filter sets</button>
-        <button class="info-button" type="button" data-info-target="metricDistributionInfo" aria-expanded="false">Distribution Plot Info</button>
+        <button class="info-button" type="button" data-info-target="metricDistributionInfo" aria-expanded="false">Setting thresholds with distribution plots</button>
       </div>
       <div id="filterSetHelp" class="info-box" hidden>
-        <p>A filter set is a named group of thresholds for the metrics below; choosing one fills them in, and any field can then be changed. An ROI passes only if it meets every threshold that is set, and a blank field is not used.</p>
+        <p>Once a set of metric filters has been set, they can be saved with a name for future as a filter set in .json format and loaded manually or programmatically for future sessions. Use the above buttons to import an existing filter set from .json, reset the current thresholds to its values. Use the &quot;Save Filter Sets&quot; section at the bottom of the filter menu to create, name, and save new filter sets using the currently applied thresholds.</p>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
-        <p>Each plot is a histogram of that metric across all ROIs, with the mean marked by a dark dotted line, the 25th and 75th percentiles by dashed gray lines, and thresholds you have entered by solid green (min) and red (max) lines, with the counts below the min, between and above the max shown under the plot. Select and drag the 25th or 75th percentile line to turn it into a min or max and adjust it, double-click a green or red line to remove it (the same as leaving the field empty, Not Used), and click elsewhere on the plot for a purple line that reports a value&apos;s percentile.</p>
+        <ul class="info-list">
+          <li>Each plot is a histogram of that metric across all ROIs.</li>
+          <li>The dark dotted line marks the mean; the dashed gray lines mark the 25th and 75th percentiles.</li>
+          <li>Select or drag the 25th or 75th percentile line to turn it into a min (green) or max (red) threshold and adjust it; typing in the box does the same.</li>
+          <li>Double-click a green or red line to remove that threshold, the same as leaving its box empty (Not Used).</li>
+          <li>The text under the plot counts ROIs below the min, between, and above the max as you adjust them.</li>
+          <li>Click elsewhere on the plot for a purple line that reports that value&apos;s percentile; <strong>Summary statistics</strong> lists the quartiles and range.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#metric-distributions" target="_blank" rel="noopener noreferrer">How the lines are placed</a></p>
       </div>
       <div class="filter-subsection-title source-heading">
@@ -2975,10 +2985,10 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
                   <input id="oasisThreshold" type="number" step="0.001" value="0.05" aria-label="Inferred spike threshold value">
                 </div>
                 <div id="oasisThresholdEquivalent" class="note"></div>
-                <div id="thresholdSdInfoText" class="threshold-info" hidden>SDs are computed separately for each ROI from that ROI&apos;s own inferred-spike values, never pooled across the session, so one <em>k</em> gives each ROI its own amplitude threshold.</div>
+                <div id="thresholdSdInfoText" class="threshold-info" hidden>SDs are computed separately for each ROI from that ROI&apos;s own inferred-spike values, never pooled across the session, so one <em>k</em> gives each ROI its own raw-value threshold.</div>
                 <label class="threshold-field">Units
                   <select id="oasisThresholdMode">
-                    <option value="absolute" selected>Absolute value</option>
+                    <option value="absolute" selected>Raw values</option>
                     <option value="sd">SD (k standard deviations)</option>
                   </select>
                 </label>
@@ -3013,7 +3023,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
           <input id="oasisFile" type="file" accept=".npy">
         </div>
         <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; the <strong>Spike threshold</strong> menu holds the slider and sets the units (absolute or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
+          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; the <strong>Spike threshold</strong> menu holds the slider and sets the units (raw values or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
@@ -3361,7 +3371,7 @@ function configureOasisThresholdControls() {{
     const k = kFromThreshold(oasisEventThreshold, stats);
     for (const el of [slider, box]) {{ el.min = kMin; el.max = kMax; el.step = 0.01; }}
     slider.value = k; box.value = Number(k.toFixed(2));
-    if (equivalent) equivalent.textContent = `SD (amplitude ${{fmt(oasisEventThreshold)}})`;
+    if (equivalent) equivalent.textContent = `SD (raw value ${{fmt(oasisEventThreshold)}})`;
   }} else {{
     for (const el of [slider, box]) {{ el.min = oasisSpikeMin.toPrecision(6); el.max = oasisSpikeMax.toPrecision(6); el.step = 0.001; }}
     slider.value = oasisEventThreshold; box.value = oasisEventThreshold;
@@ -4557,8 +4567,21 @@ function arrangeMetricBlocks() {{
       block.appendChild(details);
       const row = document.createElement("div");
       row.className = "metric-bounds";
+      const canvas = details.querySelector("canvas.metric-histogram");
       for (const element of bounds) {{
-        if (element.tagName === "SPAN") element.remove(); else row.appendChild(element);
+        if (element.tagName === "SPAN") {{ element.remove(); continue; }}
+        // The panel title names the metric, so each field is just "Min" or "Max"; the full name
+        // stays on the input for screen readers and as a tooltip.
+        const input = element.querySelector("input");
+        const textNode = [...element.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+        if (input && textNode) {{
+          const full = textNode.textContent.trim();
+          const isMax = canvas && input.id === canvas.dataset.max || (!canvas && / max$/i.test(full));
+          input.setAttribute("aria-label", full);
+          element.title = full;
+          textNode.textContent = isMax ? "Max " : "Min ";
+        }}
+        row.appendChild(element);
       }}
       block.appendChild(row);
     }}
@@ -6272,7 +6295,7 @@ function updateThresholdButton() {{
   button.appendChild(document.createTextNode(" \u25BE"));
 }}
 function unitsLabel() {{
-  return oasisThresholdMode === "sd" ? `k (${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}})` : "absolute value";
+  return oasisThresholdMode === "sd" ? `k (${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}})` : "raw value";
 }}
 function syncThresholdMenu() {{
   const menu = document.getElementById("thresholdMenu");
@@ -6287,7 +6310,7 @@ function syncThresholdMenu() {{
     const chosen = oasisSdStatistic === "auto" ? `Auto chose ${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}}. ` : "";
     note.textContent = stats.usable
       ? `${{chosen}}Selected ROI: center ${{fmt(stats.center)}}, SD ${{fmt(stats.scale)}} from ${{stats.n.toLocaleString()}} values.`
-      : `${{chosen}}The selected ROI has too few distinct values for an SD; its absolute threshold is used.`;
+      : `${{chosen}}The selected ROI has too few distinct values for an SD; its raw-value threshold is used.`;
   }}
   document.querySelectorAll('input[name="thresholdScope"]').forEach(r => {{ r.checked = r.value === thresholdScope; }});
   const allBox = document.getElementById("thresholdAllValue");
