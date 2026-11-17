@@ -1017,8 +1017,40 @@ def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarr
     roi_index_values = [row.get(index_header) for row in rows] if index_header else None
     payload = _empty_custom_metrics(n_rois)
     payload["sources"].append(str(path))
+    categorical = _categorical_column_pairs(headers, path)
+    consumed = {code for code, _ in categorical.values()} | {label for _, label in categorical.values() if label}
+    for name, (code_header, label_header) in categorical.items():
+        codes, names = _categorical_codes_and_names(rows, code_header, label_header, path)
+        if name == "cell_identity":
+            # The cell type/compartment variable: replaces the session's cell identity labels.
+            mapped: list[int | None] = [None] * n_rois
+            if roi_index_values is not None:
+                roi_by_index = {int(value): roi for roi, value in enumerate(np.asarray(suite2p_indices).astype(int))}
+                for raw_index, code in zip(roi_index_values, codes):
+                    try:
+                        roi = roi_by_index.get(int(str(raw_index).strip()))
+                    except ValueError:
+                        roi = None
+                    if roi is not None:
+                        mapped[roi] = code
+            else:
+                if len(codes) != n_rois:
+                    raise ValueError(f"{path.name}: cell_identity_code has {len(codes)} rows; expected {n_rois}.")
+                mapped = list(codes)
+            payload["cellIdentity"] = {"codes": mapped, "names": names, "source": path.name}
+            continue
+        before = len(payload["definitions"])
+        _add_custom_metric_column(
+            payload, name=name, values=[None if code is None else float(code) for code in codes], source=str(path),
+            n_rois=n_rois, suite2p_indices=suite2p_indices, roi_index_values=roi_index_values,
+        )
+        if len(payload["definitions"]) > before:
+            definition = payload["definitions"][-1]
+            definition["kind"] = "categorical"
+            definition["categories"] = {str(code): names.get(str(code), f"{name} {code}") for code in sorted({c for c in codes if c is not None})}
+            definition["needsNames"] = not label_header
     for header in headers:
-        if header == index_header:
+        if header == index_header or header in consumed:
             continue
         column = [row.get(header, "") for row in rows]
         numeric = [_jsonable_metric_value(value) for value in column]
@@ -1036,9 +1068,64 @@ def _load_custom_metric_table(path: Path, n_rois: int, suite2p_indices: np.ndarr
     return payload
 
 
+def _categorical_column_pairs(headers: list[str], path: Path) -> dict[str, tuple[str, str | None]]:
+    """Map each categorical variable NAME to its (NAME_code, NAME_label or None) headers.
+
+    A categorical variable is any column named NAME_code holding integer codes; an optional
+    NAME_label column gives each code its name. A NAME_label column without NAME_code is an error,
+    so that names are never silently read as a numeric metric. Retired names category_code and
+    cell_type_code are read as cell_identity_code.
+    """
+    lower = {header.strip().lower(): header for header in headers if header}
+    aliases = {"category_code": "cell_identity_code", "cell_type_code": "cell_identity_code",
+               "category_label": "cell_identity_label", "cell_type_label": "cell_identity_label"}
+    for old, new in aliases.items():
+        if old in lower and new not in lower:
+            lower[new] = lower.pop(old)
+    pairs: dict[str, tuple[str, str | None]] = {}
+    for key, header in lower.items():
+        if key.endswith("_code") and len(key) > 5:
+            name = key[:-5]
+            pairs[name] = (header, lower.get(f"{name}_label"))
+    for key in lower:
+        if key.endswith("_label") and len(key) > 6 and key[:-6] not in pairs:
+            raise ValueError(
+                f"{path.name}: column {lower[key]!r} names a categorical variable but there is no "
+                f"{key[:-6]}_code column; add integer codes in {key[:-6]}_code."
+            )
+    return pairs
+
+
+def _categorical_codes_and_names(
+    rows: list[dict[str, str]], code_header: str, label_header: str | None, path: Path
+) -> tuple[list[int | None], dict[str, str]]:
+    codes: list[int | None] = []
+    names: dict[str, str] = {}
+    for line, row in enumerate(rows, start=2):
+        raw = str(row.get(code_header, "") or "").strip()
+        if raw == "":
+            codes.append(None)
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            value = float("nan")
+        if not np.isfinite(value) or value != int(value):
+            raise ValueError(f"{path.name} line {line}: {code_header} must be an integer code, got {raw!r}.")
+        code = int(value)
+        codes.append(code)
+        if label_header:
+            text = str(row.get(label_header, "") or "").strip()
+            if text and str(code) not in names:
+                names[str(code)] = text
+    return codes, names
+
+
 def _merge_custom_metric_payloads(payloads: list[dict[str, Any]], n_rois: int) -> dict[str, Any]:
     merged = _empty_custom_metrics(n_rois)
     for payload in payloads:
+        if payload.get("cellIdentity"):
+            merged["cellIdentity"] = payload["cellIdentity"]
         for source in payload.get("sources", []):
             if source not in merged["sources"]:
                 merged["sources"].append(source)
@@ -2216,11 +2303,11 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
         '<div class="title">Selected ROI inferred spike fit metrics</div>'
         '<div class="oasis-diagnostics-actions">'
         '<button id="oasisDiagnosticsHide" type="button" title="Hide this panel; show it again from the dF/F panel">Hide</button>'
-        '<button id="oasisDiagnosticsInfo" class="info-button" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false">Read more</button>'
+        '<button id="oasisDiagnosticsInfo" class="info-button info-icon" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button>'
         '</div>'
         '</div>'
         '<div id="oasisDiagnosticsHelp" class="info-box" hidden>'
-        '<p>The blue line averages the selected ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold. The red curve is an exponential decay from its peak with the empirical decay tau, the time the average takes to fall to 1/e of its peak.</p>'
+        '<ul class="info-list">          <li><strong>By label</strong>: averages each labeled ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs.</li>          <li><strong>Selected ROI</strong>: averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold.</li>          <li>The red curve is an exponential decay fit; its tau is the time to fall to 1/e of the peak.</li>        </ul>'
         '<p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>'
         '</div>'
         '<div class="oasis-diagnostics-body">'
@@ -2274,7 +2361,7 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .format-spec td {{ padding: 2px 8px 2px 0; vertical-align: top; color: #344054; border-top: 1px solid #eaecf0; }}
 .format-spec td:nth-child(2) {{ white-space: nowrap; color: #475467; }}
 .load-info-rule code {{ font-size: 11px; }}
-.load-info-pop {{ position: absolute; top: 32px; right: 8px; max-width: min(460px, calc(100% - 16px)); padding: 8px 10px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 12px; line-height: 1.4; color: #344054; z-index: 4; }}
+.load-info-pop {{ position: absolute; top: 32px; right: 8px; max-width: min(600px, calc(100% - 16px)); padding: 8px 10px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); font-size: 12px; line-height: 1.4; color: #344054; z-index: 4; }}
 .viewer-column {{ display: grid; grid-template-columns: auto 12px minmax(0, 1fr); grid-template-areas: "fov split side" "trace trace trace"; column-gap: 0; row-gap: 8px; align-items: start; }}
 .viewer-column.summary-hidden {{ grid-template-columns: auto 0 34px; }}
 #fovGrid {{ grid-area: fov; max-width: 100%; position: relative; }}
@@ -2396,6 +2483,24 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-histogram-panel {{ margin-top: 8px; }}
 .info-list {{ margin: 0 0 6px; padding-left: 18px; }}
 .info-list li {{ margin: 2px 0; }}
+.info-button.info-icon {{ width: 20px; height: 20px; min-width: 20px; padding: 0; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; color: #475467; font: italic 700 12px Georgia, "Times New Roman", serif; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }}
+.info-button.info-icon:hover, .info-button.info-icon[aria-expanded="true"] {{ border-color: #175cd3; color: #175cd3; background: #eff8ff; }}
+.info-button.info-labeled {{ display: inline-flex; align-items: center; gap: 6px; }}
+.info-glyph {{ width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid currentColor; font: italic 700 10px Georgia, "Times New Roman", serif; display: inline-flex; align-items: center; justify-content: center; }}
+.panel-title-row, .source-heading, .filter-subsection-title, .summary-header, .gbu-plot-head {{ display: flex; align-items: center; gap: 8px; }}
+.panel-title-row > .info-icon, .source-heading > .info-icon, .filter-subsection-title > .info-icon, .dialog-section-title > .info-icon {{ margin-left: auto; }}
+.menu-card > summary {{ display: flex; align-items: center; gap: 8px; }}
+.plots .panel-title-row {{ justify-content: flex-start; }}
+.plots .panel-title-row > .info-icon {{ margin-left: 0; }}  /* the fixed side menu covers the right edge of these full-width panels */
+.menu-card > summary > .info-icon {{ margin-left: auto; }}
+.fov-help-host {{ position: relative; }}
+.info-box.info-pop-box {{ position: absolute; top: 34px; left: 8px; right: 8px; z-index: 5; margin: 0; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); background: #fff; }}
+.info-pop-section {{ font-weight: 600; color: #101828; margin: 8px 0 2px; border-top: 1px solid #eaecf0; padding-top: 6px; }}
+.info-pop-help .info-list {{ margin: 0 0 6px; padding-left: 18px; }}
+.load-info-pop {{ max-height: 70vh; overflow: auto; }}
+.category-editor-group {{ grid-column: 1 / -1; font-weight: 600; color: #101828; margin-top: 6px; }}
+#categoryLabelEditorSection.needs-names {{ outline: 2px solid #f79009; outline-offset: 4px; border-radius: 4px; }}
+.categorical-block .category-filter-options {{ display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }}
 details.column-chooser {{ margin-top: 6px; font-size: 13px; }}
 details.column-chooser summary {{ cursor: pointer; color: #175cd3; font-weight: 600; }}
 .column-chooser-actions {{ display: flex; align-items: center; gap: 6px; margin: 6px 0; }}
@@ -2568,11 +2673,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <button id="importPreset">Import filter set JSON</button>
       </div>
       <div class="source-heading">
-        <button class="info-button" type="button" data-info-target="filterSetHelp" aria-expanded="false">Read more: filter sets</button>
-        <button class="info-button" type="button" data-info-target="metricDistributionInfo" aria-expanded="false">Setting thresholds with distribution plots</button>
+        <button class="info-button info-labeled" type="button" data-info-target="filterSetHelp" aria-expanded="false"><span class="info-glyph" aria-hidden="true">i</span>Filter sets</button>
+        <button class="info-button info-labeled" type="button" data-info-target="metricDistributionInfo" aria-expanded="false"><span class="info-glyph" aria-hidden="true">i</span>Setting thresholds with distribution plots</button>
       </div>
       <div id="filterSetHelp" class="info-box" hidden>
-        <p>Once a set of metric filters has been set, they can be saved with a name for future as a filter set in .json format and loaded manually or programmatically for future sessions. Use the above buttons to import an existing filter set from .json, reset the current thresholds to its values. Use the &quot;Save Filter Sets&quot; section at the bottom of the filter menu to create, name, and save new filter sets using the currently applied thresholds.</p>
+        <ul class="info-list">
+          <li>A <strong>filter set</strong> is a named set of metric thresholds saved as <code>.json</code>, so the same rule can be loaded by hand or from the command line in later sessions.</li>
+          <li><strong>Filter set name</strong> and <strong>Restore selected filter set</strong> reset the thresholds to a saved set&apos;s values.</li>
+          <li><strong>Import filter set JSON</strong> loads a set from a file.</li>
+          <li>The <strong>Save Filter Sets</strong> section at the bottom of this menu names and saves the currently applied thresholds as a new set.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filter-sets" target="_blank" rel="noopener noreferrer">Filter sets in full</a></p>
       </div>
       <div id="metricDistributionInfo" class="info-box" hidden>
@@ -2588,15 +2698,19 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Cell Identity Labels</span>
-        <button class="info-button" type="button" data-info-target="cellTypeMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="cellTypeMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="cellTypeMetricSources" class="info-box" hidden>
-        <p>Cell identity labels are cell-type or compartment labels, read from the session's outputs or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Check identities to keep only ROIs with those labels; with none checked, this filter is not used.</p>
-        <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
-        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
-0,1,inhibitory
-1,-1,excitatory
-2,1,inhibitory</pre>
+        <ul class="info-list">
+          <li>Cell type/compartment labels come from the session&apos;s files or from an uploaded file&apos;s <code>cell_identity_code</code> column (with optional <code>cell_identity_label</code>).</li>
+          <li>Check values to keep only ROIs with those labels; with none checked, this filter is not used.</li>
+          <li>Other categorical variables (<code>NAME_code</code> columns) get their own checkbox filters under Uploaded ROI Metrics.</li>
+        </ul>
+        <p class="info-example-label">CSV with two categorical variables (roi_labels.csv)</p>
+        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label,layer_code
+0,1,inhibitory,2
+1,-1,excitatory,3
+2,1,inhibitory,2</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#cell-identity-labels" target="_blank" rel="noopener noreferrer">Cell identity labels and the roi_index column</a></p>
       </div>
       <div class="category-filter-options" id="cellTypeFilterOptions">
@@ -2605,10 +2719,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div id="modelDerivedFilterSection">
       <div class="filter-subsection-title source-heading">
         <span>Model-Derived Metrics</span>
-        <button class="info-button" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="modelDerivedMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
-        <p>ROI model probability is a classifier&apos;s per-ROI probability that the ROI is good, loaded from <code>roi_model_scores.h5</code>. The scores do not label ROIs unless the reviewer was generated with label initialization; use the <strong>Bulk labeling menu</strong> to label ROIs from score ranges.</p>
+        <ul class="info-list">
+          <li>ROI model probability is a classifier&apos;s per-ROI probability that the ROI is good, read from <code>roi_model_scores.h5</code>.</li>
+          <li>The scores do not label ROIs unless the reviewer was generated with label initialization.</li>
+          <li>Use the <strong>Bulk labeling menu</strong> to label ROIs from score ranges.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#roi-model-probability" target="_blank" rel="noopener noreferrer">ROI model probability in full</a></p>
       </div>
       <div class="filter-controls" id="modelScoreFilterControls">
@@ -2619,10 +2737,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div class="filter-subsection-title source-heading">
         <span>Uploaded ROI Metrics</span>
-        <button class="info-button" type="button" data-info-target="customMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="customMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="customMetricSources" class="info-box" hidden>
-        <p>Uploaded ROI metrics are your own per-ROI values, given with <code>--custom-roi-metrics</code> at generation or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>. Each column other than <code>roi_index</code> becomes a metric, and its <strong>Section</strong> menu moves it to any section of this menu and the Sort menu.</p>
+        <ul class="info-list">
+          <li>Uploaded ROI metrics are your own per-ROI values, given with <code>--custom-roi-metrics</code> or uploaded with <strong>Upload Custom ROI Metrics/Cell Identity Labels</strong>.</li>
+          <li>Each column other than <code>roi_index</code> becomes a numeric metric; a <code>NAME_code</code> column becomes a categorical variable with a checkbox filter.</li>
+          <li>Each metric&apos;s <strong>Section</strong> menu moves it to any section of this menu and of the Sort menu.</li>
+        </ul>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
         <pre class="info-example">roi_index,roi_area_px,snr
 0,112,4.2
@@ -2636,10 +2758,15 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div id="customMetricFilterControls" class="filter-controls custom-metric-slot" data-section="uploaded"></div>
       <div class="filter-subsection-title source-heading">
         <span>Morphology Metrics</span>
-        <button class="info-button" type="button" data-info-target="morphologyMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="morphologyMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="morphologyMetricSources" class="info-box" hidden>
-        <p>ROI area counts the mask's pixels, connectivity counts its separate groups of connected pixels, and aspect ratio and compactness are Suite2p's shape statistics, about 1 for a round ROI and higher for elongated or irregular ones. For masks from other software the generator computes them the same way, so binary masks give values close to but not identical with Suite2p's.</p>
+        <ul class="info-list">
+          <li><strong>ROI area</strong>: the number of pixels in the mask.</li>
+          <li><strong>Connectivity</strong>: the number of separate groups of connected pixels.</li>
+          <li><strong>Aspect ratio</strong> and <strong>compactness</strong>: Suite2p&apos;s shape statistics, about 1 for a round ROI and higher for elongated or irregular ones.</li>
+          <li>Masks from other software are measured the same way; binary masks give values close to, but not identical with, Suite2p&apos;s.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#morphology-metrics" target="_blank" rel="noopener noreferrer">Morphology calculations</a> &middot; <a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields" target="_blank" rel="noopener noreferrer">Suite2p stat.npy field definitions</a></p>
       </div>
       <div class="filter-controls">
@@ -2659,10 +2786,15 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls custom-metric-slot" data-section="morphology"></div>
       <div class="filter-subsection-title source-heading">
         <span>Fluorescence Trace Metrics</span>
-        <button class="info-button" type="button" data-info-target="fluorescenceMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="fluorescenceMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="fluorescenceMetricSources" class="info-box" hidden>
-        <p>Skew is Suite2p's trace skewness, SNR 95/50 is the 95th minus the 50th percentile of dF/F divided by residual noise, and the large-transient score is a CaImAn-style exceptional-event score. Larger values of all three indicate clearer transients.</p>
+        <ul class="info-list">
+          <li><strong>Skew</strong>: Suite2p&apos;s trace skewness.</li>
+          <li><strong>SNR 95/50</strong>: the 95th minus the 50th percentile of dF/F, divided by the residual noise.</li>
+          <li><strong>Large-transient score</strong>: a CaImAn-style exceptional-event score.</li>
+          <li>Larger values of all three indicate clearer transients.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#fluorescence-trace-metrics" target="_blank" rel="noopener noreferrer">Trace metrics and their source code</a></p>
       </div>
       <div class="filter-controls">
@@ -2679,10 +2811,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-controls custom-metric-slot" data-section="fluorescence"></div>
       <div class="filter-subsection-title source-heading">
         <span>Inferred Spike Metrics</span>
-        <button class="info-button" type="button" data-info-target="inferredSpikeMetricSources" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="inferredSpikeMetricSources" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="inferredSpikeMetricSources" class="info-box" hidden>
-        <p>These metrics are computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated, from any ROI-by-frame inferred-spike array, whatever method produced it. Changing the threshold in the viewer updates only the selected ROI's display.</p>
+        <ul class="info-list">
+          <li>Computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated.</li>
+          <li>Work with any ROI-by-frame inferred-spike array, whatever method produced it.</li>
+          <li>Changing the threshold in the viewer updates the selected ROI&apos;s display and the summary, not these values.</li>
+        </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-metrics" target="_blank" rel="noopener noreferrer">Inferred spike metrics in full</a></p>
       </div>
       <div class="filter-controls">
@@ -2700,10 +2836,14 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <div class="filter-subsection-title">Save Filter Sets</div>
       <div class="source-heading">
         <span class="note">Save the current thresholds as a named filter set for reuse, or keep it in a copy of this HTML.</span>
-        <button class="info-button" type="button" data-info-target="saveFiltersHelp" aria-expanded="false">Read more</button>
+        <button class="info-button info-icon" type="button" data-info-target="saveFiltersHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
       </div>
       <div id="saveFiltersHelp" class="info-box" hidden>
-        <p><strong>Save new filter set</strong> keeps the current thresholds under a name until the page closes, and <strong>Save filter set into HTML</strong> also downloads a copy of the reviewer with it, the labels and the sort order embedded. <strong>Import filter set JSON</strong> loads an exported or hand-written file like the one below, which can also be given at generation with <code>--filter-settings</code>.</p>
+        <ul class="info-list">
+          <li><strong>Save new filter set</strong> keeps the current thresholds under a name until the page closes.</li>
+          <li><strong>Save filter set into HTML</strong> also downloads a copy of the reviewer with it, the labels and the sort order embedded.</li>
+          <li><strong>Import filter set JSON</strong> loads an exported or hand-written file like the one below, which can also be given at generation with <code>--filter-settings</code>.</li>
+        </ul>
         <p class="info-example-label">Filter set JSON (strict_soma.json)</p>
         <pre class="info-example">{{
   "name": "strict soma",
@@ -2735,10 +2875,13 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       <button id="closeSortDialogTop" class="dialog-close" type="button" aria-label="Close">&times;</button>
     </div>
     <div class="source-heading">
-      <button class="info-button" type="button" data-info-target="sortMetricSources" aria-expanded="false">Read more: metric sources</button>
+      <button class="info-button info-labeled" type="button" data-info-target="sortMetricSources" aria-expanded="false"><span class="info-glyph" aria-hidden="true">i</span>Metric sources</button>
     </div>
     <div id="sortMetricSources" class="info-box" hidden>
-      <p>These are the same metrics as in the Filter menu, with the same definitions and sources. Cell identity code sorts by the integer code, which in legacy cell-type files is <code>-1</code> excitatory, <code>0</code> unsure and <code>1</code> inhibitory.</p>
+      <ul class="info-list">
+          <li>These are the Filter menu&apos;s metrics, with the same definitions and sources.</li>
+          <li>Categorical codes, including cell identity, sort by their integer code.</li>
+        </ul>
       <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#sort-metrics" target="_blank" rel="noopener noreferrer">Sort metrics and their sources</a></p>
     </div>
     <div class="trace-sort">
@@ -2786,12 +2929,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
     <div class="dialog-header">
       <div class="dialog-title">Save Labels</div>
       <div>
-        <button id="saveLabelsInfo" class="info-button" type="button" aria-expanded="false" aria-controls="saveLabelsHelp">Read more</button>
+        <button id="saveLabelsInfo" class="info-button info-icon" type="button" aria-expanded="false" aria-controls="saveLabelsHelp" aria-label="Read more" title="Read more">i</button>
         <button id="closeSaveLabelsDialogTop" class="dialog-close" type="button" aria-label="Close">&times;</button>
       </div>
     </div>
     <div id="saveLabelsHelp" class="info-box" hidden>
-      <p><strong>Save current state into HTML</strong> downloads a copy that keeps the labels, uploaded metrics, saved filter sets and sort order; the CSV and NPY exports have one row or entry per ROI in original-index order. The labels NPY codes <code>NaN</code> as not labeled, <code>0</code> bad, <code>1</code> good and <code>2</code> unsure.</p>
+      <ul class="info-list">
+          <li><strong>Save current state into HTML</strong> downloads a copy that keeps the labels, uploaded metrics, saved filter sets and sort order.</li>
+          <li><strong>Export metric spreadsheet CSV</strong> writes one row per ROI with the columns chosen under <strong>Choose columns</strong>.</li>
+          <li><strong>Export labels NPY</strong> writes one entry per ROI in original-index order: <code>NaN</code> not labeled, <code>0</code> bad, <code>1</code> good, <code>2</code> unsure.</li>
+        </ul>
       <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#saving-labels-and-exports" target="_blank" rel="noopener noreferrer">What each export contains</a></p>
     </div>
     <div class="save-options">
@@ -2839,7 +2986,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
     <div class="dialog-section">
         <div class="dialog-section-title source-heading">
           <span>Assign Labels to Metric Ranges</span>
-          <button class="info-button" type="button" data-info-target="rangeLabelHelp" aria-expanded="false">Read more</button>
+          <button class="info-button info-icon" type="button" data-info-target="rangeLabelHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
         </div>
         <div id="rangeLabelHelp" class="info-box" hidden>
           <ul class="info-list">
@@ -2884,40 +3031,34 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
     </div>
     <div class="dialog-section">
       <div class="dialog-section-title">Upload File</div>
-      <div class="custom-upload-type">
-        <label><input type="radio" name="customUploadKind" value="numeric" checked> QC metric</label>
-        <label><input type="radio" name="customUploadKind" value="categorical"> Cell identity label</label>
-      </div>
       <input id="customRoiUploadFile" type="file" accept=".csv,.tsv,.txt">
       <button id="applyCustomRoiUpload" type="button">Load selected file</button>
       <div id="customRoiUploadStatus" class="note"></div>
       <div class="info-box">
         <p>Files are comma- or tab-separated (<code>.csv</code>, <code>.tsv</code>, or <code>.txt</code> in either layout) with a header row and one row per ROI. Columns:</p>
         <table class="format-spec">
-          <tr><th colspan="3">QC metric file</th></tr>
+          <tr><th>Column</th><th>Required</th><th>Meaning</th></tr>
           <tr><td><code>roi_index</code></td><td>optional</td><td>The ROI&apos;s 0-based original index. Without it, row <em>k</em> is ROI <em>k</em> and the file needs exactly one row per ROI.</td></tr>
-          <tr><td>any other column</td><td>at least one</td><td>One numeric metric per column, named by its header. Blank or non-numeric cells are missing values.</td></tr>
-          <tr><th colspan="3">Cell type/compartment (cell identity) file</th></tr>
-          <tr><td><code>roi_index</code></td><td>optional</td><td>As above.</td></tr>
-          <tr><td><code>cell_identity_code</code></td><td>this, the label, or both</td><td>Integer code for the ROI&apos;s cell type or compartment.</td></tr>
-          <tr><td><code>cell_identity_label</code></td><td>this, the code, or both</td><td>Name of the cell type or compartment. With a code, it names that code; on its own, codes are assigned automatically. Rename values afterwards below.</td></tr>
+          <tr><td><code>NAME_code</code></td><td>for each categorical variable</td><td>Integer codes of a categorical variable called NAME, one column per variable, so one file can hold several. <code>cell_identity_code</code> is the cell type/compartment variable.</td></tr>
+          <tr><td><code>NAME_label</code></td><td>optional</td><td>The name of each code in <code>NAME_code</code>. Without it you are asked to name the codes after upload, in the section below.</td></tr>
+          <tr><td>any other column</td><td>optional</td><td>One numeric metric per column, named by its header. Blank or non-numeric cells are missing values.</td></tr>
         </table>
         <p class="info-example-label">CSV (qc_metrics.csv)</p>
         <pre class="info-example">roi_index,roi_area_px,snr
 0,112,4.2
 1,86,1.8
 2,140,3.1</pre>
-        <p class="info-example-label">CSV (cell_identity_labels.csv)</p>
-        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label
-0,1,inhibitory
-1,-1,excitatory
-2,1,inhibitory</pre>
+        <p class="info-example-label">CSV with two categorical variables (roi_labels.csv)</p>
+        <pre class="info-example">roi_index,cell_identity_code,cell_identity_label,layer_code
+0,1,inhibitory,2
+1,-1,excitatory,3
+2,1,inhibitory,2</pre>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#uploading-files" target="_blank" rel="noopener noreferrer">Upload formats in full</a></p>
       </div>
     </div>
     <div class="dialog-section" id="categoryLabelEditorSection" hidden>
-      <div class="dialog-section-title">Cell type/compartment labels</div>
-      <div class="note">Edit the name for each unique cell type/compartment value. These labels are used in the filter menu, sort readouts, and spreadsheet export.</div>
+      <div class="dialog-section-title">Names of categorical codes</div>
+      <div class="note">Edit the name of each code of each categorical variable: cell type/compartment, and any uploaded <code>NAME_code</code> column or variable created from ranges. These names are used in the filter menu, sort readouts, and spreadsheet export.</div>
       <div id="categoryLabelEditor" class="category-label-editor"></div>
     </div>
     <div class="dialog-actions">
@@ -2930,17 +3071,27 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div class="fov-review {fov_review_class}" id="fovReview">
           <div class="grid {fov_grid_class}" id="fovGrid">
             <button type="button" class="fov-resize-icon" id="fovResizeIcon" aria-label="Resize the field of view" title="Drag to resize the field of view; double-click to reset"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M9 2h5v5M14 2L8.5 7.5M7 14H2V9M2 14l5.5-5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-            <div class="panel"><div class="panel-title-row"><div class="title">{channel1_title}</div></div><div class="imagewrap"><img id="green"><svg class="overlay" preserveAspectRatio="xMidYMid meet"></svg></div></div>
+            <div class="panel fov-help-host"><div class="panel-title-row"><div class="title">{channel1_title}</div><button class="info-button info-icon" type="button" data-info-target="fovHelp" aria-expanded="false" aria-label="About the field of view" title="About the field of view">i</button></div><div id="fovHelp" class="info-box info-pop-box" hidden><ul class="info-list">
+          <li>Each image is the session&apos;s mean frame for one channel, with every visible ROI outlined; colors follow the ROI&apos;s current label.</li>
+          <li>Click an ROI to select it; the selected ROI is highlighted and its trace is shown below.</li>
+          <li>Ctrl/&#8984; + scroll or pinch zooms, drag pans, and double-click resets; the corner icon or the divider resizes the field of view.</li>
+          <li><strong>Inputs</strong>: Suite2p&apos;s <code>ops.npy</code> mean images, or <code>mean_func.npy</code> and the optional <code>mean_anat.npy</code> (2-D float arrays) for masks from other software.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/inputs/#mean-images" target="_blank" rel="noopener noreferrer">Field of view inputs</a></p></div><div class="imagewrap"><img id="green"><svg class="overlay" preserveAspectRatio="xMidYMid meet"></svg></div></div>
             {red_panel}
           </div>
           <div class="fov-splitter" id="fovSplitter" role="separator" aria-orientation="vertical" title="Drag to resize the field of view; double-click to reset"></div>
           <div class="panel fov-side gbu-summary" id="summaryColumn">
             <div class="summary-header">
               <div class="title">Summary by QC label</div>
-              <div class="oasis-diagnostics-actions"><button id="summaryHide" type="button" title="Hide the summary panels; show them again from the tab at the right">Hide</button><button class="info-button" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false">Read more</button></div>
+              <div class="oasis-diagnostics-actions"><button id="summaryHide" type="button" title="Hide the summary panels; show them again from the tab at the right">Hide</button><button class="info-button info-icon" type="button" data-info-target="gbuSummaryHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></div>
             </div>
             <div id="gbuSummaryHelp" class="info-box" hidden>
-                <p>These plots group every ROI by its current label and regroup as you label, with ROIs that a filter labeled Bad counted as Bad. Transients are each ROI's spike-triggered average dF/F (mean &plusmn; s.e.m. across ROIs, windows beyond |dF/F| 20 left out), and firing rates are inferred spikes above threshold per second, drawn as a density per label.</p>
+                <ul class="info-list">
+          <li>Every ROI is grouped by its current label and the plots regroup as you label; ROIs a filter labeled Bad count as Bad.</li>
+          <li><strong>ROIs by label</strong>: counts and fractions.</li>
+          <li><strong>Firing rate by label</strong>: inferred spikes above threshold per second, as a density per label.</li>
+          <li><strong>Average transient</strong>: each ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs, with windows beyond |dF/F| 20 left out.</li>
+        </ul>
                 <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#summary-of-good-bad-and-unsure-rois" target="_blank" rel="noopener noreferrer">How the summary is computed</a></p>
               </div>
             <div class="note" id="gbuSummaryNote"></div>
@@ -2961,11 +3112,15 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
                     <div class="gbu-plot-title" id="gbuTransientTitle">Average transient</div>
                     <div class="head-actions">
                       <div class="rate-toggle" role="group" aria-label="Average transient view"><button type="button" data-transient-mode="label" aria-pressed="true">By label</button><button type="button" data-transient-mode="roi" aria-pressed="false">Selected ROI</button></div>
-                      <button class="info-button" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false">Read more</button>
+                      <button class="info-button info-icon" type="button" data-info-target="oasisDiagnosticsHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button>
                     </div>
                   </div>
                   <div id="oasisDiagnosticsHelp" class="info-box" hidden>
-                    <p><strong>By label</strong> averages each labeled ROI&apos;s spike-triggered dF/F (mean &plusmn; s.e.m. across ROIs). <strong>Selected ROI</strong> averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold, with an exponential decay fit (red) whose tau is the time to fall to 1/e of the peak.</p>
+                    <ul class="info-list">
+          <li><strong>By label</strong>: averages each labeled ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs.</li>
+          <li><strong>Selected ROI</strong>: averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold.</li>
+          <li>The red curve is an exponential decay fit; its tau is the time to fall to 1/e of the peak.</li>
+        </ul>
                     <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>
                   </div>
                   <div class="gbu-subtitle" id="transientSubtitle">By label, mean &plusmn; s.e.m. across ROIs <span class="note" id="oasisDiagnosticsSummary"></span></div>
@@ -2981,7 +3136,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
 
       <div class="panel trace-panel">
-        <button type="button" class="load-info-icon" id="traceLoadInfo" aria-label="dF/F and inferred spike loading" aria-expanded="false" title="dF/F and inferred spike loading">i</button>
+        <button type="button" class="load-info-icon" id="traceLoadInfo" aria-label="About this panel: inferred spikes, thresholds and loading dF/F" aria-expanded="false" title="About this panel">i</button>
         <div class="trace-header-row">
           <div class="title" id="traceTitle">Selected ROI dF/F</div>
           <div class="trace-header-controls" id="traceOasisControls">
@@ -3027,16 +3182,22 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
             </div>
             <button id="loadDffFile" type="button" title="Choose an ROI x frame float32 .npy file">Load dF/F</button>
             <button id="loadOasisFile" type="button" title="Choose an ROI x frame float32 .npy file">Load inferred spikes</button>
-            <button class="info-button" type="button" data-info-target="traceHelp" aria-expanded="false">Read more</button>
-          </div>
+                      </div>
         </div>
         
         <div class="trace-loader" id="traceLoader" hidden>
           <input id="dffFile" type="file" accept=".npy">
           <input id="oasisFile" type="file" accept=".npy">
         </div>
-        <div id="traceHelp" class="info-box" hidden>
-          <p>The inferred-spike array can hold any per-frame spike estimate (amplitudes, rates, probabilities, counts or signed deconvolved values, from any method), and frames above the threshold are drawn as red dots and used for the average transient, its taus and the firing rate; the <strong>Spike threshold</strong> menu holds the slider and sets the units (raw values or per-ROI SD), how the SD is measured, and a default for all ROIs. dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order that load automatically when this HTML is opened through a web server, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside it.</p>
+        <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
+          <div class="info-pop-help" id="traceHelp">
+          <ul class="info-list">
+          <li><strong>Inferred spikes</strong> can be any per-frame estimate from any method: amplitudes, rates, probabilities, counts or signed deconvolved values.</li>
+          <li>Frames above the threshold are drawn as red dots and feed the average transient, its taus and the firing rate.</li>
+          <li><strong>Spike threshold</strong> holds the slider and sets the units (raw values or per-ROI SD), how the SD is measured, and a default for all ROIs.</li>
+          <li><strong>File format</strong>: dF/F and inferred spikes are float32 <code>.npy</code> arrays of shape (ROIs, frames) in original-index order, named <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code>.</li>
+          <li>Placed beside this HTML, they load automatically when the page is opened through a web server; otherwise use <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</li>
+        </ul>
           <p class="info-source"><span id="spikeSourceText">The inferred-spike file does not record which method produced it.</span></p>
           <p class="info-example-label">Python</p>
           <pre class="info-example">import numpy as np
@@ -3046,11 +3207,12 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
           <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-threshold" target="_blank" rel="noopener noreferrer">Inferred spikes and the threshold</a> &middot; <a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#loading-dff-and-inferred-spike-files" target="_blank" rel="noopener noreferrer">Loading dF/F and inferred spike files</a></p>
           <p id="spikeDocsSuite2p" hidden><a class="docs-link" href="https://suite2p.readthedocs.io/en/latest/deconvolution/" target="_blank" rel="noopener noreferrer">Suite2p spike deconvolution / OASIS documentation</a></p>
           <p id="spikeDocsOasis" hidden><a class="docs-link" href="https://doi.org/10.1371/journal.pcbi.1005423" target="_blank" rel="noopener noreferrer">Original OASIS deconvolution paper</a></p>
-        </div>
-        <div class="load-info-pop" id="traceLoadNote" role="status" hidden>
+          </div>
+          <div class="info-pop-section">Loading dF/F and inferred spikes</div>
           <div id="traceLoadStatus"></div>
-          <p class="load-info-rule">Embedded or separate files: by default the generator embeds dF/F and inferred spikes in this HTML when ROIs &times; frames is at most {embed_max_roi_frames:,} (about {embed_limit_mb_text} MB of encoded data per array; set with <code>--embed-limit-mb</code>, or force either mode with <code>--force-embed true</code> or <code>false</code>).{trace_storage_note} Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML instead, which load automatically only when the page is opened through a web server (an http:// or https:// address); otherwise choose them with <strong>Load dF/F</strong> and <strong>Load inferred spikes</strong>.</p>
+          <ul class="info-list load-info-rule"><li><strong>Embedded or separate files:</strong> by default dF/F and inferred spikes are embedded in this HTML when ROIs &times; frames is at most {embed_max_roi_frames:,} (about {embed_limit_mb_text} MB of encoded data per array).{trace_storage_note}</li><li>Set the limit with <code>--embed-limit-mb</code>, or force either mode with <code>--force-embed true</code> or <code>false</code>.</li><li>Larger sessions get <code>SESSION_dff.npy</code> and <code>SESSION_inferred_spikes.npy</code> beside the HTML, which load automatically only through a web server (an http:// or https:// address).</li></ul>
           <p class="load-info-rule" id="traceLoadSession"></p>
+
         </div>
         <canvas id="traceCanvas"></canvas>
         <div class="note">Ctrl/&#8984; + scroll or pinch to zoom time, drag to pan. Double-click to reset.</div>
@@ -3065,39 +3227,58 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
       <button id="toggleSideMenu" class="side-menu-toggle" type="button" aria-expanded="true">Hide menu</button>
       <div class="control-column">
           <details class="panel label-controls menu-card" open>
-            <summary>Upload (optional)</summary>
+            <summary>Upload (optional)<button class="info-button info-icon" type="button" data-info-target="uploadCardHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></summary>
             <div class="menu-card-content">
+            <div id="uploadCardHelp" class="info-box" hidden><ul class="info-list">
+          <li>Adds your own per-ROI values to this reviewer: numeric QC metrics, cell type/compartment labels, and other categorical variables.</li>
+          <li>Files are comma- or tab-separated (<code>.csv</code>, <code>.tsv</code> or <code>.txt</code>) with an optional <code>roi_index</code> column; the dialog lists the required columns.</li>
+          <li>Uploaded values appear in the Filter and Sort menus and in the spreadsheet export, and are kept by <strong>Save current state into HTML</strong>.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/inputs/#uploaded-metrics-and-categorical-labels" target="_blank" rel="noopener noreferrer">Upload file formats</a></p></div>
               <button id="openCustomRoiUploadDialog" type="button">Upload Custom ROI Metrics/Cell Identity Labels</button>
             </div>
           </details>
           <details class="panel morphology-card menu-card" open>
-            <summary>Filter</summary>
+            <summary>Filter<button class="info-button info-icon" type="button" data-info-target="filterCardHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></summary>
             <div class="menu-card-content">
+            <div id="filterCardHelp" class="info-box" hidden><ul class="info-list">
+          <li><strong>Filter ROIs</strong> opens the threshold menu, grouped by morphology, trace, inferred-spike, model and uploaded metrics.</li>
+          <li>Changing thresholds previews how many ROIs pass; <strong>Apply Filters</strong> labels the failing ROIs Bad.</li>
+          <li>The line above the button names the loaded filter set and how many ROIs it keeps.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#filtering-rois" target="_blank" rel="noopener noreferrer">Filtering in full</a></p></div>
             <div class="qc-header"><strong>ROI Metric Filters</strong><span id="targetStructureInline" class="qc-current"></span></div>
             <div id="filterSummaryInline" class="filter-summary"></div>
             <button id="openMorphologyDialog" type="button">Filter ROIs</button>
             </div>
           </details>
           <details class="panel sort-card menu-card" open>
-            <summary>Sort</summary>
+            <summary>Sort<button class="info-button info-icon" type="button" data-info-target="sortCardHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></summary>
             <div class="menu-card-content">
+            <div id="sortCardHelp" class="info-box" hidden><ul class="info-list">
+          <li><strong>Sort filtered ROIs</strong> orders the ROIs shown in the field of view, the stacked traces and the arrow-key order by one or more metrics.</li>
+          <li>The current order is named beside <strong>Sorting</strong>.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#sorting-rois" target="_blank" rel="noopener noreferrer">Sorting in full</a></p></div>
               <div class="sort-header"><strong>Sorting</strong><span id="sortCurrent" class="sort-current"></span></div>
               <button id="openSortDialog" type="button">Sort filtered ROIs</button>
             </div>
           </details>
           <details class="panel label-controls menu-card" open>
-            <summary>Labeler</summary>
+            <summary>Labeler<button class="info-button info-icon" type="button" data-info-target="roiIndexHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></summary>
             <div class="menu-card-content">
+            <div id="roiIndexHelp" class="info-box" hidden>
+              <ul class="info-list">
+          <li><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI&apos;s fixed 0-based identifier: ROI <em>k</em> is row <em>k</em> of every input and exported file and <em>k</em> in every <code>roi_index</code> column.</li>
+          <li>Type an original index in the box to jump to that ROI.</li>
+          <li>Sort position counts from 1 within the ROIs currently shown and changes when you sort, filter or hide labels.</li>
+          <li>Keys: left/right arrows move between visible ROIs; G, B, U and N label Good, Bad, Unsure and Not labeled.</li>
+        </ul>
+              <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#original-index-and-sort-position" target="_blank" rel="noopener noreferrer">Original index and sort position in full</a></p>
+            </div>
             <span id="labelCounts"></span>
             <strong class="labeler-keys">Left/right arrows select the previous/next visible ROI.</strong>
             <span class="note">Keyboard: G/B/U/N label.</span>
             <strong>Manually label filtered ROIs</strong>
             <label>Selected ROI (<span class="roi-index-label">Suite2p Original Index</span>) <input id="roiInput" type="number" min="0" value="0"> <span id="selectedSortPosition" class="note"></span></label>
-            <button class="info-button" type="button" data-info-target="roiIndexHelp" aria-expanded="false">Read more</button>
-            <div id="roiIndexHelp" class="info-box" hidden>
-              <p><strong><span class="roi-index-label">Suite2p Original Index</span></strong> is the ROI's fixed 0-based identifier: ROI <em>k</em> is row <em>k</em> of every input and exported file and <em>k</em> in every <code>roi_index</code> column. Sort position counts from 1 within the ROIs currently shown and changes when you sort, filter or hide labels; type an original index in the box to jump to that ROI.</p>
-              <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#original-index-and-sort-position" target="_blank" rel="noopener noreferrer">Original index and sort position in full</a></p>
-            </div>
+
             <details class="roi-details">
               <summary id="roiDetailsSummary">Selected ROI Details</summary>
               <div id="readout"></div>
@@ -3128,8 +3309,12 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
             </div>
           </details>
           <details class="panel label-controls menu-card" open>
-            <summary>View and Export</summary>
+            <summary>View and Export<button class="info-button info-icon" type="button" data-info-target="viewExportHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></summary>
             <div class="menu-card-content">
+            <div id="viewExportHelp" class="info-box" hidden><ul class="info-list">
+          <li><strong>View ROI metric spreadsheet</strong> opens every ROI&apos;s labels and metrics in a new window, with rows colored by the current QC label and a column chooser.</li>
+          <li><strong>Save Labels</strong> saves the reviewer with its current state, or exports the spreadsheet CSV or a labels <code>.npy</code> file.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/export/" target="_blank" rel="noopener noreferrer">Export formats</a></p></div>
             <button id="openExclusions">View ROI metric spreadsheet</button>
             <button id="openSaveLabelsDialog" type="button">Save Labels</button>
             </div>
@@ -3139,7 +3324,12 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
   </div>
   <div class="plots">
     <div class="panel">
-      <div class="title" id="stackTitle">Stacked dF/F</div>
+      <div class="panel-title-row"><div class="title" id="stackTitle">Stacked dF/F</div><button class="info-button info-icon" type="button" data-info-target="stackHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></div>
+      <div id="stackHelp" class="info-box" hidden><ul class="info-list">
+          <li>One dF/F trace per visible ROI, in the current sort order, sharing the selected ROI&apos;s time window.</li>
+          <li><strong>First ROI</strong> and <strong>Last ROI</strong> pick which sort positions are drawn; <strong>Show all visible traces</strong> draws every visible ROI.</li>
+          <li>Ctrl/&#8984; + scroll or pinch zooms time; double-click resets.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#stacked-traces" target="_blank" rel="noopener noreferrer">Stacked traces in full</a></p></div>
       <div class="controls">
         <strong>Stacked trace range</strong>
         <label>First ROI <input id="yStart" type="number" min="0" value="0"></label>
@@ -3150,9 +3340,15 @@ np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.flo
       <div class="note">Ctrl/&#8984; + scroll or pinch to zoom time.</div>
     </div>
     <div class="panel">
-      <div class="title">Motion correction shift per frame</div>
+      <div class="panel-title-row"><div class="title">Motion correction shift per frame</div><button class="info-button info-icon" type="button" data-info-target="motionHelp" aria-expanded="false" aria-label="Read more" title="Read more">i</button></div>
+      <div id="motionHelp" class="info-box" hidden><ul class="info-list">
+          <li>The top plot shows the rigid x and y shift applied to each frame by motion correction, in pixels, for the current trace time window; the bottom plot is the distribution of shifts over the session.</li>
+          <li><strong>Input from any software</strong>: <code>move_offset.h5</code> at the session root with datasets <code>xoff</code> and <code>yoff</code>, each a 1-D array with one value per frame (pixels, same frame order as the traces).</li>
+          <li>Without that file the reviewer uses Suite2p&apos;s <code>ops.npy</code> <code>xoff</code>/<code>yoff</code>; with neither, these plots are left empty.</li>
+          <li>Non-rigid (patch-wise) shifts are not shown; give their per-frame mean, or the rigid shifts, as <code>xoff</code>/<code>yoff</code>.</li>
+        </ul><p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/inputs/#motion-offsets" target="_blank" rel="noopener noreferrer">Motion offset format</a></p></div>
       <canvas id="motionDriftCanvas"></canvas>
-      <div class="note">Rigid x/y shift per frame from Suite2p motion correction. These plots follow the current trace time window.</div>
+      <div class="note">Rigid x/y shift per frame from motion correction. These plots follow the current trace time window.</div>
       <div class="title" style="margin-top:8px;">Motion correction pixel shifts</div>
       <canvas id="motionDistributionCanvas"></canvas>
     </div>
@@ -3171,6 +3367,21 @@ if (!Array.isArray(data.customRoiMetrics.values) || data.customRoiMetrics.values
 }}
 if (!Array.isArray(data.customRoiMetrics.sources)) data.customRoiMetrics.sources = [];
 data.categoryLabelMap = data.categoryLabelMap || {{"1": "inhibitory", "-1": "excitatory", "0": "unsure"}};
+// Cell type/compartment labels given on the command line (cell_identity_code in a --custom-roi-metrics file)
+// replace the session's own.
+if (data.customRoiMetrics?.cellIdentity && Array.isArray(data.customRoiMetrics.cellIdentity.codes)) {{
+  data.cellTypeLabels = data.customRoiMetrics.cellIdentity.codes;
+  data.categoryLabelMap = {{...data.categoryLabelMap, ...(data.customRoiMetrics.cellIdentity.names || {{}})}};
+  data.cellTypeLabelSource = data.customRoiMetrics.cellIdentity.source || "command line";
+  data.cellTypeLabelOrigin = "command line";
+}}
+function categoryPasses(value, codes) {{
+  if (!Array.isArray(codes) || !codes.length) return true;
+  return codes.some(code => code === "not_loaded" ? !Number.isFinite(value) : Number(code) === value);
+}}
+function isCategoricalMetric(definition) {{
+  return definition?.kind === "categorical" || (!!definition?.categories && definition?.origin === "ranges");
+}}
 const ROI_INDEX_LABEL = data.roiIndexLabel || "Suite2p Original Index";
 const ROI_INDEX_LABEL_LOWER = ROI_INDEX_LABEL.toLowerCase();
 document.querySelectorAll(".roi-index-label").forEach(el => {{ el.textContent = ROI_INDEX_LABEL; }});
@@ -3524,7 +3735,7 @@ if (data.dffStorageMode === "embedded" && data.dff) {{
   if (!note.textContent) note.textContent = "dF/F and inferred spikes are embedded in this page.";
   setLoadInfoState(usesSidecars && openedFromDisk);
   document.getElementById("traceLoadInfo")?.addEventListener("click", event => {{ event.stopPropagation(); toggleLoadInfo(); }});
-  document.addEventListener("click", event => {{ if (!event.target.closest("#traceLoadNote, #traceLoadInfo")) toggleLoadInfo(false); }});
+  document.addEventListener("click", event => {{ if (!event.target.closest("#traceLoadNote, #traceLoadInfo, #thresholdMenu")) toggleLoadInfo(false); }});
   document.addEventListener("keydown", event => {{ if (event.key === "Escape") toggleLoadInfo(false); }});
 }}
 // The Suite2p and OASIS links are shown only when the inferred-spike file says it came from them
@@ -3624,28 +3835,53 @@ function writeCategoryFilter(values) {{
   }});
 }}
 function renderCategoryLabelEditor() {{
+  // One block per categorical variable: cell type/compartment, then each uploaded NAME_code variable.
   const section = document.getElementById("categoryLabelEditorSection");
   const editor = document.getElementById("categoryLabelEditor");
   if (!section || !editor) return;
-  const values = Array.from(new Set((data.cellTypeLabels || []).filter(value => value !== null && value !== undefined).map(value => String(value)))).sort((a, b) => Number(a) - Number(b));
   editor.textContent = "";
-  section.hidden = values.length === 0;
-  for (const value of values) {{
-    const label = document.createElement("label");
-    const span = document.createElement("span");
-    span.textContent = `Value ${{value}}`;
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = data.categoryLabelMap?.[String(value)] || `cell identity ${{value}}`;
-    input.addEventListener("change", () => {{
-      data.categoryLabelMap[String(value)] = input.value.trim() || `cell identity ${{value}}`;
-      updateCategoricalFilterOptions();
-      updateSortCurrent();
-      draw();
+  const groups = [];
+  const cellValues = Array.from(new Set((data.cellTypeLabels || []).filter(value => value !== null && value !== undefined).map(value => String(value)))).sort((a, b) => Number(a) - Number(b));
+  if (cellValues.length) groups.push({{
+    title: "Cell type/compartment (cell_identity_code)", codes: cellValues,
+    get: code => data.categoryLabelMap?.[code] || `cell identity ${{code}}`,
+    set: (code, text) => {{ data.categoryLabelMap[code] = text || `cell identity ${{code}}`; data.cellIdentityNeedsNames = false; }},
+  }});
+  for (const definition of customMetricDefinitions().filter(isCategoricalMetric)) {{
+    groups.push({{
+      title: `${{definition.label}} (${{definition.origin === "ranges" ? "created from ranges" : definition.label + "_code"}})`,
+      codes: Object.keys(definition.categories || {{}}).sort((a, b) => Number(a) - Number(b)),
+      get: code => definition.categories[code],
+      set: (code, text) => {{ definition.categories[code] = text || `${{definition.label}} ${{code}}`; definition.needsNames = false; }},
     }});
-    label.appendChild(span);
-    label.appendChild(input);
-    editor.appendChild(label);
+  }}
+  section.hidden = groups.length === 0;
+  for (const group of groups) {{
+    const heading = document.createElement("div");
+    heading.className = "category-editor-group";
+    heading.textContent = group.title;
+    editor.appendChild(heading);
+    for (const code of group.codes) {{
+      const label = document.createElement("label");
+      const span = document.createElement("span");
+      span.textContent = `Code ${{code}}`;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = group.get(code);
+      input.addEventListener("change", () => {{
+        group.set(code, input.value.trim());
+        section.classList.remove("needs-names");
+        updateCategoricalFilterOptions();
+        renderCustomMetricControls();
+        renderCustomSortMetrics();
+        updateSortMetricHandlers();
+        updateSortCurrent();
+        draw();
+      }});
+      label.appendChild(span);
+      label.appendChild(input);
+      editor.appendChild(label);
+    }}
   }}
 }}
 function parseDelimitedRows(text) {{
@@ -3732,30 +3968,109 @@ function roiIndexColumn(headers) {{
   if (retired >= 0) throw new Error(`The ROI index column must be named roi_index; rename the column "${{headers[retired]}}".`);
   return -1;
 }}
+function categoricalColumnPairs(headers) {{
+  // NAME_code columns hold integer codes for categorical variable NAME; NAME_label names them.
+  const lower = headers.map(value => String(value).trim().toLowerCase());
+  const aliases = {{category_code: "cell_identity_code", cell_type_code: "cell_identity_code", category_label: "cell_identity_label", cell_type_label: "cell_identity_label"}};
+  const names = lower.map(value => (aliases[value] && !lower.includes(aliases[value])) ? aliases[value] : value);
+  const pairs = {{}};
+  names.forEach((value, col) => {{
+    if (value.endsWith("_code") && value.length > 5) pairs[value.slice(0, -5)] = {{code: col, label: names.indexOf(`${{value.slice(0, -5)}}_label`)}};
+  }});
+  names.forEach((value, col) => {{
+    if (value.endsWith("_label") && value.length > 6 && !pairs[value.slice(0, -6)]) {{
+      throw new Error(`Column "${{headers[col]}}" names a categorical variable but there is no ${{value.slice(0, -6)}}_code column; add integer codes in ${{value.slice(0, -6)}}_code.`);
+    }}
+  }});
+  return pairs;
+}}
+function categoricalCodes(rows, codeCol, labelCol, name) {{
+  const codes = [], names = {{}};
+  rows.forEach((row, i) => {{
+    const raw = String(row[codeCol] ?? "").trim();
+    if (raw === "") {{ codes.push(null); return; }}
+    const value = Number(raw);
+    if (!Number.isInteger(value)) throw new Error(`Line ${{i + 2}}: ${{name}}_code must be an integer code, got "${{raw}}".`);
+    codes.push(value);
+    const text = labelCol >= 0 ? String(row[labelCol] ?? "").trim() : "";
+    if (text && names[String(value)] === undefined) names[String(value)] = text;
+  }});
+  return {{codes, names}};
+}}
+function mapRowsToRois(values, roiIndexValues, what) {{
+  const out = new Array(data.nRois).fill(null);
+  if (roiIndexValues) {{
+    const roiBySuite2p = new Map(data.suite2pIndices.map((value, roi) => [Number(value), roi]));
+    values.forEach((value, i) => {{ const roi = roiBySuite2p.get(Number(roiIndexValues[i])); if (roi !== undefined) out[roi] = value; }});
+  }} else {{
+    if (values.length !== data.nRois) throw new Error(`${{what}} has ${{values.length}} rows; expected ${{data.nRois}}.`);
+    values.forEach((value, roi) => {{ out[roi] = value; }});
+  }}
+  return out;
+}}
 function loadCustomMetricRows(rows, sourceName) {{
+  // Returns what was loaded: {{numeric: [names], categorical: [{{key, label, needsNames}}], cellIdentity: bool}}.
   if (rows.length < 2) throw new Error("Expected a header row and one row per ROI.");
   const headers = rows[0].map(value => value.trim());
   const indexCol = roiIndexColumn(headers);
-  const roiIndexValues = indexCol >= 0 ? rows.slice(1).map(row => row[indexCol]) : null;
-  for (let col = 0; col < headers.length; col++) {{
-    if (col === indexCol) continue;
-    const values = rows.slice(1).map(row => row[col]);
-    if (!values.some(value => normalizeCustomMetricValue(value) !== null)) continue;
-    addCustomMetricDefinition(headers[col], values, sourceName, roiIndexValues);
+  const body = rows.slice(1);
+  const roiIndexValues = indexCol >= 0 ? body.map(row => row[indexCol]) : null;
+  const pairs = categoricalColumnPairs(headers);
+  const consumed = new Set([indexCol]);
+  const loaded = {{numeric: [], categorical: [], cellIdentity: false, skipped: []}};
+  for (const [name, cols] of Object.entries(pairs)) {{
+    consumed.add(cols.code); if (cols.label >= 0) consumed.add(cols.label);
+    const {{codes, names}} = categoricalCodes(body, cols.code, cols.label, name);
+    if (name === "cell_identity") {{
+      data.cellTypeLabels = mapRowsToRois(codes, roiIndexValues, "cell_identity_code");
+      if (cols.label < 0) {{
+        // No names given: do not let the built-in defaults name the uploaded codes.
+        for (const code of new Set(codes.filter(code => code !== null))) data.categoryLabelMap[String(code)] = `cell identity ${{code}}`;
+      }}
+      data.categoryLabelMap = {{...data.categoryLabelMap, ...names}};
+      data.cellTypeLabelSource = sourceName;
+      data.cellTypeLabelOrigin = "upload";
+      data.cellIdentityNeedsNames = cols.label < 0;
+      loaded.cellIdentity = true;
+      continue;
+    }}
+    const before = customMetricDefinitions().length;
+    addCustomMetricDefinition(name, codes, sourceName, roiIndexValues);
+    if (customMetricDefinitions().length > before) {{
+      const definition = customMetricDefinitions()[customMetricDefinitions().length - 1];
+      const present = [...new Set(codes.filter(code => code !== null))].sort((x, y) => x - y);
+      definition.kind = "categorical";
+      definition.categories = Object.fromEntries(present.map(code => [String(code), names[String(code)] ?? `${{name}} ${{code}}`]));
+      definition.needsNames = cols.label < 0;
+      loaded.categorical.push({{key: definition.key, label: definition.label, needsNames: definition.needsNames}});
+    }}
   }}
+  for (let col = 0; col < headers.length; col++) {{
+    if (consumed.has(col)) continue;
+    const values = body.map(row => row[col]);
+    if (!values.some(value => normalizeCustomMetricValue(value) !== null)) {{ loaded.skipped.push(headers[col]); continue; }}
+    const before = customMetricDefinitions().length;
+    addCustomMetricDefinition(headers[col], values, sourceName, roiIndexValues);
+    if (customMetricDefinitions().length > before) loaded.numeric.push(headers[col]);
+  }}
+  return loaded;
 }}
 function rejectUnsupportedTable(sourceName) {{
   if (!/\.(csv|tsv|txt)$/i.test(sourceName)) throw new Error("use a comma- or tab-separated .csv, .tsv or .txt file with a header row and one row per ROI.");
 }}
 function loadCustomMetricText(text, sourceName) {{
   rejectUnsupportedTable(sourceName);
-  loadCustomMetricRows(parseDelimitedRows(text), sourceName);
+  const loaded = loadCustomMetricRows(parseDelimitedRows(text), sourceName);
+  updateCellTypeLabelStatus();
   renderCustomMetricControls();
   renderCustomSortMetrics();
   updateMetricDefaults();
   evaluateFilter();
   updateSortMetricHandlers();
   renderAutoLoadedFileList();
+  updateSortCurrent();
+  draw();
+  return loaded;
 }}
 function categoryCodeFromLabel(label, labelToCode) {{
   const text = String(label ?? "").trim();
@@ -3909,11 +4224,37 @@ function renderCustomMetricControls() {{
     }});
     sectionLabel.appendChild(sectionSelect);
     header.appendChild(sectionLabel);
-    if (definition.categories) {{
+    if (definition.categories && !isCategoricalMetric(definition)) {{
       const legend = document.createElement("span");
       legend.className = "note";
       legend.textContent = Object.entries(definition.categories).map(([code, text]) => `${{code}} = ${{text}}`).join(", ");
       header.appendChild(legend);
+    }}
+    if (isCategoricalMetric(definition)) {{
+      // Categorical variables filter by checked codes, like cell identity.
+      const block = document.createElement("div");
+      block.className = "metric-block categorical-block";
+      block.appendChild(header);
+      const options = document.createElement("div");
+      options.className = "category-filter-options";
+      const keptCodes = new Set((kept[definition.key]?.codes || []).map(String));
+      const note = document.createElement("span");
+      note.className = "note";
+      note.textContent = `If no ${{definition.label}} values are checked, this filter is not used.`;
+      options.appendChild(note);
+      for (const [code, text] of Object.entries(definition.categories || {{}}).concat([["not_loaded", "no value"]])) {{
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox"; input.className = "custom-category-filter"; input.dataset.key = definition.key; input.value = code;
+        input.checked = keptCodes.has(code);
+        input.addEventListener("change", evaluateFilter);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(code === "not_loaded" ? " no value" : ` ${{text}} (${{code}})`));
+        options.appendChild(label);
+      }}
+      block.appendChild(options);
+      controls.appendChild(block);
+      continue;
     }}
     const makeBound = (id, text) => {{
       const label = document.createElement("label");
@@ -3956,10 +4297,15 @@ function renderCustomMetricControls() {{
   if (typeof refreshRangeMetricOptions === "function") refreshRangeMetricOptions();
   updateModelDerivedVisibility();
   arrangeMetricBlocks();
+  if (!document.activeElement?.closest?.("#categoryLabelEditor")) renderCategoryLabelEditor();
 }}
 function readCustomMetricFiltersFromInputs() {{
   const values = {{}};
   for (const definition of customMetricDefinitions()) {{
+    if (isCategoricalMetric(definition)) {{
+      values[definition.key] = {{codes: [...document.querySelectorAll(`.custom-category-filter[data-key="${{definition.key}}"]:checked`)].map(input => input.value)}};
+      continue;
+    }}
     const ids = customMetricFilterIds(definition.key);
     const read = id => {{
       const input = document.getElementById(id);
@@ -4875,6 +5221,10 @@ function readFilter() {{
 function readCustomMetricFilters() {{
   const filters = {{}};
   for (const definition of customMetricDefinitions()) {{
+    if (isCategoricalMetric(definition)) {{
+      filters[definition.key] = {{codes: [...document.querySelectorAll(`.custom-category-filter[data-key="${{definition.key}}"]:checked`)].map(input => input.value)}};
+      continue;
+    }}
     const ids = customMetricFilterIds(definition.key);
     filters[definition.key] = {{min: filterValue(ids.min), max: filterValue(ids.max)}};
   }}
@@ -4907,6 +5257,10 @@ function normalizeFilter(filter) {{
   const customMetrics = filter.customMetrics || {{}};
   for (const definition of customMetricDefinitions()) {{
     const raw = customMetrics[definition.key] || {{}};
+    if (isCategoricalMetric(definition)) {{
+      normalized.customMetrics[definition.key] = {{codes: (Array.isArray(raw.codes) ? raw.codes : []).map(String)}};
+      continue;
+    }}
     const min = raw.min === null || raw.min === undefined || String(raw.min).trim() === "" ? NaN : Number(raw.min);
     const max = raw.max === null || raw.max === undefined || String(raw.max).trim() === "" ? NaN : Number(raw.max);
     normalized.customMetrics[definition.key] = {{
@@ -4923,6 +5277,11 @@ function writeFilter(filter) {{
     if (input) input.value = value === null || value === undefined ? "" : value;
   }}
   for (const [key, bounds] of Object.entries(normalized.customMetrics || {{}})) {{
+    if (Array.isArray(bounds.codes)) {{
+      const wanted = new Set(bounds.codes);
+      document.querySelectorAll(`.custom-category-filter[data-key="${{key}}"]`).forEach(input => {{ input.checked = wanted.has(input.value); }});
+      continue;
+    }}
     const ids = customMetricFilterIds(key);
     const minInput = document.getElementById(ids.min);
     const maxInput = document.getElementById(ids.max);
@@ -4986,6 +5345,7 @@ function passesFilter(roi, metrics, filter) {{
   const customMetricPass = customMetricDefinitions().every(definition => {{
     const bounds = filter.customMetrics?.[definition.key] || {{}};
     const value = customMetricValue(roi, definition.key);
+    if (isCategoricalMetric(definition)) return categoryPasses(value, bounds.codes);
     return passesLower(value, bounds.min) && passesUpper(value, bounds.max);
   }});
   return (
@@ -5049,6 +5409,10 @@ function morphologyReasons(metrics, dffMetrics, filter, roi = null) {{
   for (const definition of customMetricDefinitions()) {{
     const bounds = filter.customMetrics?.[definition.key] || {{}};
     const value = customMetricValue(roi, definition.key);
+    if (isCategoricalMetric(definition)) {{
+      if (!categoryPasses(value, bounds.codes)) reasons.push(`${{definition.label}} ${{Number.isFinite(value) ? customCategoryName(definition, value) || value : "no value"}} not among selected values`);
+      continue;
+    }}
     const min = bounds.min, max = bounds.max;
     if (!passesLower(value, min)) reasons.push(`${{definition.label}} ${{fmt(value)}} below ${{min}}`);
     if (!passesUpper(value, max)) reasons.push(`${{definition.label}} ${{fmt(value)}} above ${{max}}`);
@@ -6271,21 +6635,27 @@ document.getElementById("applyCustomRoiUpload").addEventListener("click", () => 
     status.textContent = "Choose a .csv, .tsv or .txt file first.";
     return;
   }}
-  const kind = document.querySelector('input[name="customUploadKind"]:checked')?.value || "numeric";
   const reader = new FileReader();
   reader.onload = () => {{
     try {{
-      if (kind === "categorical") {{
-        loadCellTypeTableText(String(reader.result || ""), file.name);
-        data.cellTypeLabelOrigin = "upload";
-        renderAutoLoadedFileList();
-        status.textContent = `Loaded cell identity labels from ${{file.name}}.`;
-      }} else {{
-        loadCustomMetricText(String(reader.result || ""), file.name);
-        status.textContent = `Loaded QC metric(s) from ${{file.name}}.`;
+      const loaded = loadCustomMetricText(String(reader.result || ""), file.name);
+      const parts = [];
+      if (loaded.numeric.length) parts.push(`${{loaded.numeric.length}} numeric metric(s) (${{loaded.numeric.join(", ")}})`);
+      if (loaded.categorical.length) parts.push(`${{loaded.categorical.length}} categorical variable(s) (${{loaded.categorical.map(c => c.label).join(", ")}})`);
+      if (loaded.cellIdentity) parts.push("cell identity labels");
+      let text = parts.length ? `Loaded ${{parts.join(", ")}} from ${{file.name}}.` : `No usable columns found in ${{file.name}}.`;
+      if (loaded.skipped.length) text += ` Skipped column(s) with no numeric values: ${{loaded.skipped.join(", ")}}.`;
+      const unnamed = loaded.categorical.filter(c => c.needsNames).map(c => c.label).concat(loaded.cellIdentity && data.cellIdentityNeedsNames ? ["cell identity"] : []);
+      if (unnamed.length) {{
+        text += ` No _label column was given for ${{unnamed.join(", ")}}: name each code below.`;
+        const editor = document.getElementById("categoryLabelEditorSection");
+        editor.classList.add("needs-names");
+        editor.scrollIntoView({{block: "nearest"}});
+        editor.querySelector("input")?.focus();
       }}
+      status.textContent = text;
     }} catch (error) {{
-      status.textContent = `Could not load ${{kind === "categorical" ? "cell identity labels" : "QC metric"}}: ${{error.message}}`;
+      status.textContent = `Could not load ${{file.name}}: ${{error.message}}`;
     }}
   }};
   reader.readAsText(file);
@@ -6773,7 +7143,8 @@ saveLabelsInfo.addEventListener("click", () => {{
 }});
 updateModelDerivedVisibility();
 document.querySelectorAll("[data-info-target]").forEach(button => {{
-  button.addEventListener("click", () => {{
+  button.addEventListener("click", event => {{
+    if (button.closest("summary")) event.preventDefault();
     const target = document.getElementById(button.dataset.infoTarget);
     if (!target) return;
     const shouldShow = target.hasAttribute("hidden");
@@ -6928,7 +7299,7 @@ const RANGE_LABEL_BUILT_IN = [
 ];
 function rangeLabelMetrics() {{
   const metrics = RANGE_LABEL_BUILT_IN.filter(metric => finiteMetricValues(metric).length);
-  for (const definition of customMetricDefinitions()) metrics.push(`custom:${{definition.key}}`);
+  for (const definition of customMetricDefinitions()) if (!isCategoricalMetric(definition)) metrics.push(`custom:${{definition.key}}`);
   return metrics;
 }}
 function refreshRangeMetricOptions() {{
@@ -7136,7 +7507,7 @@ function applyRangeLabels() {{
     data.customRoiMetrics.values[roi][key] = k < 0 ? null : k + 1;
     if (k >= 0) tally[k]++;
   }}
-  data.customRoiMetrics.definitions.push({{key, label: name, source: `ranges of ${{metricLabel(metric)}}`, origin: "ranges", section: "uploaded", categories}});
+  data.customRoiMetrics.definitions.push({{key, label: name, source: `ranges of ${{metricLabel(metric)}}`, origin: "ranges", section: "uploaded", kind: "categorical", categories}});
   renderCustomMetricControls();
   renderCustomSortMetrics();
   updateSortMetricHandlers();
@@ -7554,10 +7925,12 @@ def main() -> None:
         default=[],
         help=(
             "Path to ROI-level custom metrics to embed in the reviewer. Can be repeated. "
-            "A comma- or tab-separated .csv, .tsv or .txt file with a header row; each "
-            "column other than roi_index is one numeric metric. roi_index (optional) is the "
-            "0-based original ROI index; without it row k is ROI k and the file must have "
-            "exactly one row per ROI. Blank or non-numeric cells are missing values."
+            "A comma- or tab-separated .csv, .tsv or .txt file with a header row. roi_index "
+            "(optional) is the 0-based original ROI index; without it row k is ROI k and the "
+            "file must have exactly one row per ROI. A column NAME_code of integer codes is a "
+            "categorical variable NAME, named by an optional NAME_label column; "
+            "cell_identity_code/cell_identity_label set the cell type/compartment labels. "
+            "Every other column is one numeric metric; blank or non-numeric cells are missing."
         ),
     )
     parser.add_argument(
