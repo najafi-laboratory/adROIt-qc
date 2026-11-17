@@ -13,6 +13,7 @@ import base64
 import csv
 import io
 import json
+import math
 import os
 import re
 import zipfile
@@ -1173,53 +1174,144 @@ def _load_custom_roi_metrics(
     return _merge_custom_metric_payloads(payloads, n_rois)
 
 
+def _fit_exponential_decay(values: np.ndarray, frame_rate: float, baseline: float) -> float:
+    """Least-squares fit of values = baseline + A * exp(-t / tau) from the peak; returns tau in seconds.
+
+    For each tau the amplitude A has a closed form, so tau is found by a log-spaced grid search
+    (0.5 frame to 10 s) refined by golden-section search. Returns NaN when the best tau is at
+    either end of the range or the fitted amplitude is not positive.
+    """
+
+    t = np.arange(values.size, dtype=np.float64) / frame_rate
+    z = np.asarray(values, dtype=np.float64) - baseline
+
+    def sse(tau: float) -> tuple[float, float]:
+        e = np.exp(-t / tau)
+        amplitude = float(np.dot(z, e) / np.dot(e, e))
+        r = z - amplitude * e
+        return float(np.dot(r, r)), amplitude
+
+    lo, hi = math.log(0.5 / frame_rate), math.log(10.0)
+    grid = [math.exp(lo + (hi - lo) * i / 199) for i in range(200)]
+    best = int(np.argmin([sse(g)[0] for g in grid]))
+    if best == 0 or best == len(grid) - 1:
+        return np.nan
+    a, c = math.log(grid[best - 1]), math.log(grid[best + 1])
+    g = (math.sqrt(5.0) - 1.0) / 2.0
+    x1, x2 = c - g * (c - a), a + g * (c - a)
+    f1, f2 = sse(math.exp(x1))[0], sse(math.exp(x2))[0]
+    for _ in range(40):
+        if f1 < f2:
+            c, x2, f2 = x2, x1, f1
+            x1 = c - g * (c - a)
+            f1 = sse(math.exp(x1))[0]
+        else:
+            a, x1, f1 = x1, x2, f2
+            x2 = a + g * (c - a)
+            f2 = sse(math.exp(x2))[0]
+    tau = math.exp((a + c) / 2.0)
+    return tau if sse(tau)[1] > 0 else np.nan
+
+
+def _inferred_spike_kernel(
+    trace: np.ndarray,
+    spikes: np.ndarray,
+    threshold: float,
+    frame_rate: float,
+) -> dict[str, Any]:
+    """Estimate the average calcium transient around inferred spikes by regression.
+
+    Model: dF/F(t) = c + sum over lags l of k(l) * s(t - l), where s(t) is 1 at frames whose
+    inferred-spike value exceeds the threshold and 0 otherwise, and lags run from -0.5 s to +2 s.
+    The kernel k is solved by least squares (normal equations with a 1e-6 ridge on the kernel
+    terms), so overlapping events are separated rather than averaged together. From k:
+    SNR = (peak - mean of pre-event lags) / SD of pre-event lags; rise tau = time between the
+    interpolated 10% and 90% crossings before the peak; decay tau = exponential fit from the peak.
+    The browser recomputes these with the same definition.
+    """
+
+    trace = np.asarray(trace, dtype=np.float64)
+    spikes = np.asarray(spikes, dtype=np.float64)
+    n = int(trace.size)
+    pre = max(2, int(round(frame_rate * 0.5)))
+    post = max(4, int(round(frame_rate * 2.0)))
+    lags = np.arange(-pre, post + 1)
+    n_lags = int(lags.size)
+    events = np.isfinite(spikes) & (spikes > threshold)
+    result: dict[str, Any] = {
+        "kernel": None, "lags": lags, "n_frames": int(events.sum()), "snr": np.nan, "rise": np.nan,
+        "decay": np.nan, "baseline": np.nan, "amplitude": np.nan, "peak": None,
+    }
+    if result["n_frames"] < 3 or not np.isfinite(frame_rate) or frame_rate <= 0:
+        return result
+    finite = np.isfinite(trace)
+    cumulative = np.concatenate(([0], np.cumsum(events)))
+    t = np.arange(n)
+    near = (cumulative[np.clip(t + pre + 1, 0, n)] - cumulative[np.clip(t - post, 0, n)]) > 0
+    rows = np.flatnonzero(near & finite)
+    design = np.zeros((rows.size, n_lags))
+    for j, lag in enumerate(lags):
+        source = rows - lag
+        valid = (source >= 0) & (source < n)
+        design[valid, j] = events[source[valid]]
+    gram = np.zeros((n_lags + 1, n_lags + 1))
+    rhs = np.zeros(n_lags + 1)
+    gram[:n_lags, :n_lags] = design.T @ design
+    gram[:n_lags, n_lags] = gram[n_lags, :n_lags] = design.sum(axis=0)
+    gram[n_lags, n_lags] = float(finite.sum())
+    rhs[:n_lags] = design.T @ trace[rows]
+    rhs[n_lags] = float(trace[finite].sum())
+    gram[np.arange(n_lags), np.arange(n_lags)] += 1e-6
+    try:
+        beta = np.linalg.solve(gram, rhs)
+    except np.linalg.LinAlgError:
+        return result
+    kernel = beta[:n_lags]
+    baseline = float(np.mean(kernel[:pre]))
+    baseline_sd = float(np.std(kernel[:pre], ddof=1))
+    peak = int(np.argmax(kernel[pre:])) + pre
+    amplitude = float(kernel[peak] - baseline)
+    result.update(kernel=kernel, baseline=baseline, peak=peak)
+    if amplitude <= 0:
+        return result
+    if baseline_sd > 0:
+        result["snr"] = amplitude / baseline_sd
+
+    def crossing_before_peak(level: float) -> float:
+        for i in range(peak, 0, -1):
+            if kernel[i - 1] < level <= kernel[i]:
+                return (i - 1) + (level - kernel[i - 1]) / (kernel[i] - kernel[i - 1])
+        return np.nan
+
+    c10 = crossing_before_peak(baseline + 0.1 * amplitude)
+    c90 = crossing_before_peak(baseline + 0.9 * amplitude)
+    if np.isfinite(c10) and np.isfinite(c90):
+        result["rise"] = max(0.0, c90 - c10) / frame_rate
+    tail = kernel[peak:]
+    tau = _fit_exponential_decay(tail, frame_rate, baseline)
+    if np.isfinite(tau):
+        e = np.exp(-np.arange(tail.size) / frame_rate / tau)
+        result["amplitude"] = float(np.dot(tail - baseline, e) / np.dot(e, e))
+    else:
+        target = baseline + amplitude / math.e
+        hits = np.flatnonzero(tail <= target)
+        if hits.size and hits[0] > 0:
+            j = int(hits[0])
+            tau = ((j - 1) + (tail[j - 1] - target) / (tail[j - 1] - tail[j])) / frame_rate
+    result["decay"] = float(tau) if np.isfinite(tau) else np.nan
+    return result
+
+
 def _oasis_event_waveform_metrics(
     trace: np.ndarray,
     spikes: np.ndarray,
     threshold: float,
     frame_rate: float,
 ) -> tuple[float, float, float]:
-    event_frames = np.flatnonzero(np.isfinite(spikes) & (spikes > threshold))
-    if event_frames.size == 0 or not np.isfinite(frame_rate) or frame_rate <= 0:
-        return np.nan, np.nan, np.nan
-    pre = max(2, int(round(frame_rate * 0.5)))
-    post = max(4, int(round(frame_rate * 2.0)))
-    windows = []
-    for frame in event_frames:
-        frame = int(frame)
-        if frame - pre < 0 or frame + post >= trace.size:
-            continue
-        window = np.asarray(trace[frame - pre : frame + post + 1], dtype=np.float32)
-        if np.all(np.isfinite(window)):
-            windows.append(window)
-    if len(windows) < 3:
-        return np.nan, np.nan, np.nan
-    event_mean = np.mean(np.stack(windows, axis=0), axis=0)
-    baseline = float(np.mean(event_mean[:pre]))
-    baseline_sd = float(np.std(event_mean[:pre], ddof=1))
-    peak_index = int(np.nanargmax(event_mean[pre:])) + pre
-    peak = float(event_mean[peak_index])
-    amplitude = peak - baseline
-    snr = amplitude / baseline_sd if baseline_sd > 0 and amplitude > 0 else np.nan
+    """Inferred spike SNR, rise tau and decay tau from the regression kernel."""
 
-    rise_tau = np.nan
-    if amplitude > 0 and peak_index > 0:
-        low = baseline + 0.1 * amplitude
-        high = baseline + 0.9 * amplitude
-        rise_segment = event_mean[: peak_index + 1]
-        low_hits = np.flatnonzero(rise_segment >= low)
-        high_hits = np.flatnonzero(rise_segment >= high)
-        if low_hits.size and high_hits.size:
-            rise_tau = float(max(0, high_hits[0] - low_hits[0]) / frame_rate)
-
-    decay_tau = np.nan
-    if amplitude > 0:
-        decay_target = baseline + amplitude / np.e
-        decay_segment = event_mean[peak_index:]
-        decay_hits = np.flatnonzero(decay_segment <= decay_target)
-        if decay_hits.size:
-            decay_tau = float(decay_hits[0] / frame_rate)
-    return float(snr), rise_tau, decay_tau
+    kernel = _inferred_spike_kernel(trace, spikes, threshold, frame_rate)
+    return float(kernel["snr"]), float(kernel["rise"]), float(kernel["decay"])
 
 
 def _add_oasis_event_metrics(
@@ -1255,6 +1347,10 @@ def _add_oasis_event_metrics(
         dff_metrics[roi]["oasis_event_snr"] = float(snr) if np.isfinite(snr) else None
         dff_metrics[roi]["oasis_rise_tau_seconds"] = float(rise_tau) if np.isfinite(rise_tau) else None
         dff_metrics[roi]["oasis_decay_tau_seconds"] = float(decay_tau) if np.isfinite(decay_tau) else None
+        dff_metrics[roi]["inferred_spike_metric_threshold"] = float(threshold) if np.isfinite(threshold) else None
+        dff_metrics[roi]["inferred_spike_frames_above_threshold"] = int(
+            np.count_nonzero(np.isfinite(oasis_spikes[roi]) & (np.asarray(oasis_spikes[roi], dtype=np.float64) > threshold))
+        )
     return dff_metrics
 
 
@@ -2317,7 +2413,7 @@ def _render_reviewer_html(output_path: Path, payload: dict[str, Any], *, input_l
         '</div>'
         '</div>'
         '<div id="oasisDiagnosticsHelp" class="info-box" hidden>'
-        '<ul class="info-list">          <li><strong>By label</strong>: averages each labeled ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs.</li>          <li><strong>Selected ROI</strong>: averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold.</li>          <li>The red curve is an exponential decay fit; its tau is the time to fall to 1/e of the peak.</li>        </ul>'
+        '<ul class="info-list">          <li><strong>By label</strong>: averages each labeled ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs.</li>          <li><strong>Selected ROI</strong>: that ROI&apos;s transient estimated by regressing its dF/F on every frame whose inferred-spike value is above the threshold, so overlapping events are separated; the same estimate gives the inferred spike metrics.</li>          <li>The red curve is an exponential decay fitted from the peak; its tau is the inferred spike decay tau.</li>        </ul>'
         '<p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>'
         '</div>'
         '<div class="oasis-diagnostics-body">'
@@ -2493,6 +2589,10 @@ h1 {{ margin: 0; font-size: 21px; letter-spacing: 0; }}
 .range-histogram-panel {{ margin-top: 8px; }}
 .info-list {{ margin: 0 0 6px; padding-left: 18px; }}
 .info-list li {{ margin: 2px 0; }}
+.spike-metric-threshold {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }}
+.spike-metric-threshold label {{ display: flex; align-items: center; gap: 6px; font-weight: 600; margin: 0; }}
+.spike-metric-threshold input {{ width: 90px; }}
+.spike-metric-threshold .note {{ flex-basis: 100%; margin: 0; }}
 .info-button.info-icon {{ width: 20px; height: 20px; min-width: 20px; padding: 0; border-radius: 50%; border: 1.5px solid #98a2b3; background: #fff; color: #475467; font: italic 700 12px Georgia, "Times New Roman", serif; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }}
 .info-button.info-icon:hover, .info-button.info-icon[aria-expanded="true"] {{ border-color: #175cd3; color: #175cd3; background: #eff8ff; }}
 .info-button.info-labeled {{ display: inline-flex; align-items: center; gap: 6px; }}
@@ -2826,11 +2926,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div id="inferredSpikeMetricSources" class="info-box" hidden>
         <ul class="info-list">
-          <li>Computed from dF/F windows around inferred spikes above the threshold used when the reviewer was generated.</li>
+          <li>Computed from each ROI&apos;s transient, estimated by regressing its dF/F on the frames whose inferred-spike value is above the threshold (lags &minus;0.5 to 2 s): SNR is the peak over the SD of the pre-event part, rise tau the 10&ndash;90% rise, decay tau an exponential fit.</li>
           <li>Work with any ROI-by-frame inferred-spike array, whatever method produced it.</li>
-          <li>Changing the threshold in the viewer updates the selected ROI&apos;s display and the summary, not these values.</li>
+          <li>The <strong>Spike threshold</strong> here and the dF/F panel&apos;s spike threshold are one setting; <strong>Recompute inferred spike metrics</strong> recalculates these values for every ROI at it, in raw or per-ROI SD units.</li>
         </ul>
         <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-metrics" target="_blank" rel="noopener noreferrer">Inferred spike metrics in full</a></p>
+      </div>
+      <div class="spike-metric-threshold" id="spikeMetricThresholdRow">
+        <label>Spike threshold <input id="spikeMetricThreshold" type="number" step="0.001" aria-label="Inferred spike threshold for these metrics"> <span id="spikeMetricThresholdUnits"></span></label>
+        <button type="button" id="recomputeSpikeMetrics">Recompute inferred spike metrics</button>
+        <div class="note" id="spikeMetricStatus"></div>
       </div>
       <div class="filter-controls">
         <label>Inferred spike SNR min <span class="threshold-default" id="oasisEventSnrDefault"></span><input id="oasisEventSnrMin" type="number" step="0.01" placeholder="Not Used"></label>
@@ -3129,8 +3234,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
                   <div id="oasisDiagnosticsHelp" class="info-box" hidden>
                     <ul class="info-list">
           <li><strong>By label</strong>: averages each labeled ROI&apos;s spike-triggered dF/F, mean &plusmn; s.e.m. across ROIs.</li>
-          <li><strong>Selected ROI</strong>: averages that ROI&apos;s baseline-subtracted dF/F around every frame whose inferred-spike value is above the threshold.</li>
-          <li>The red curve is an exponential decay fit; its tau is the time to fall to 1/e of the peak.</li>
+          <li><strong>Selected ROI</strong>: that ROI&apos;s transient estimated by regressing its dF/F on every frame whose inferred-spike value is above the threshold, so overlapping events are separated; the same estimate gives the inferred spike metrics.</li>
+          <li>The red curve is an exponential decay fitted from the peak; its tau is the inferred spike decay tau.</li>
         </ul>
                     <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#inferred-spike-fit-panel" target="_blank" rel="noopener noreferrer">The fit panel in full</a></p>
                   </div>
@@ -3189,6 +3294,8 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
                 </fieldset>
                 <div class="note" id="thresholdScopeNote"></div>
                 <button id="resetOasisThreshold" type="button">Reset selected ROI to default</button>
+                <button id="recomputeSpikeMetricsMenu" type="button">Recompute inferred spike metrics</button>
+                <div class="note" id="spikeMetricStatusMenu"></div>
               </div>
             </div>
             <button id="loadDffFile" type="button" title="Choose an ROI x frame float32 .npy file">Load dF/F</button>
@@ -3641,6 +3748,7 @@ function setDffFromArrayBuffer(arrayBuffer, silent = false) {{
     updateSidecarLoadNote();
   }}
   draw();
+  if (typeof syncSpikeMetricControls === "function") syncSpikeMetricControls();
 }}
 // Sidecars load by fetch() relative to this page, which browsers allow over http(s) but not
 // for a page opened from disk (file://). The notes below say which case applies.
@@ -3790,6 +3898,7 @@ function setOasisFromArrayBuffer(arrayBuffer, silent = false) {{
     updateSidecarLoadNote();
   }}
   draw();
+  if (typeof syncSpikeMetricControls === "function") syncSpikeMetricControls();
 }}
 function updateCellTypeLabelStatus() {{
   updateCategoricalFilterOptions();
@@ -6014,76 +6123,21 @@ function diagnosticMedian(values) {{
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }}
 function selectedOasisDiagnostics(roi, threshold) {{
+  // The selected ROI's transient is the regression kernel, the same estimate as the inferred spike metrics.
   const key = `${{roi}}:${{Number(threshold).toPrecision(8)}}`;
   if (oasisDiagnosticsCache.has(key)) return oasisDiagnosticsCache.get(key);
   const tr = trace(roi), sp = spikeTrace(roi);
   if (!tr || !sp) return null;
-  const preFrames = Math.max(3, Math.round(data.frameRate * 0.5));
-  const postFrames = Math.max(6, Math.round(data.frameRate * 2.0));
-  const minSeparation = Math.max(1, Math.round(data.frameRate * 0.25));
-  const events = [];
-  let last = -Infinity;
-  for (let f = preFrames; f < data.nFrames - postFrames; f++) {{
-    if (!Number.isFinite(sp[f]) || sp[f] <= threshold) continue;
-    if (f - last < minSeparation) continue;
-    events.push(f);
-    last = f;
+  const k = spikeKernel(tr, sp, threshold);
+  const fr = Number(data.frameRate);
+  const diagnostics = {{nFrames: k.nFrames, waveform: [], times: [], expModel: [], tau: k.decay}};
+  if (k.kernel) {{
+    const pre = -k.lags[0];
+    diagnostics.times = k.lags.map(l => l / fr);
+    diagnostics.waveform = k.kernel.map(v => v - k.baseline);
+    diagnostics.expModel = k.kernel.map((_, i) => (i < k.peak || !Number.isFinite(k.decay) || !Number.isFinite(k.amplitude))
+      ? NaN : k.amplitude * Math.exp(-(i - k.peak) / fr / k.decay));
   }}
-  if (!events.length) {{
-    const empty = {{events, waveform: [], times: [], expModel: [], tau: NaN}};
-    oasisDiagnosticsCache.set(key, empty);
-    return empty;
-  }}
-  const len = preFrames + postFrames + 1;
-  const sums = new Float64Array(len);
-  const counts = new Uint32Array(len);
-  for (const eventFrame of events) {{
-    const baselineValues = [];
-    for (let f = eventFrame - preFrames; f < eventFrame; f++) {{
-      const value = tr[f];
-      if (Number.isFinite(value)) baselineValues.push(value);
-    }}
-    const baseline = Number.isFinite(diagnosticMedian(baselineValues)) ? diagnosticMedian(baselineValues) : 0;
-    for (let offset = -preFrames; offset <= postFrames; offset++) {{
-      const value = tr[eventFrame + offset];
-      if (!Number.isFinite(value)) continue;
-      const index = offset + preFrames;
-      sums[index] += value - baseline;
-      counts[index] += 1;
-    }}
-  }}
-  const waveform = [];
-  const times = [];
-  for (let i = 0; i < len; i++) {{
-    waveform.push(counts[i] ? sums[i] / counts[i] : NaN);
-    times.push((i - preFrames) / data.frameRate);
-  }}
-  let peakIndex = preFrames;
-  let peak = -Infinity;
-  for (let i = preFrames; i < waveform.length; i++) {{
-    const value = waveform[i];
-    if (Number.isFinite(value) && value > peak) {{ peak = value; peakIndex = i; }}
-  }}
-  const baselineTail = diagnosticMedian(waveform.slice(Math.max(0, waveform.length - Math.max(3, Math.round(data.frameRate * 0.25)))));
-  const amplitude = peak - (Number.isFinite(baselineTail) ? baselineTail : 0);
-  let tau = NaN;
-  if (Number.isFinite(amplitude) && amplitude > 0) {{
-    const target = (Number.isFinite(baselineTail) ? baselineTail : 0) + amplitude / Math.E;
-    for (let i = peakIndex; i < waveform.length; i++) {{
-      const value = waveform[i];
-      if (!Number.isFinite(value)) continue;
-      if (value <= target) {{
-        tau = Math.max(0, times[i] - times[peakIndex]);
-        break;
-      }}
-    }}
-  }}
-  const expModel = waveform.map((_, i) => {{
-    if (!Number.isFinite(amplitude) || amplitude <= 0 || i < peakIndex) return NaN;
-    if (!Number.isFinite(tau) || tau <= 0) return NaN;
-    return (Number.isFinite(baselineTail) ? baselineTail : 0) + amplitude * Math.exp(-(times[i] - times[peakIndex]) / tau);
-  }});
-  const diagnostics = {{events, waveform, times, expModel, tau}};
   oasisDiagnosticsCache.set(key, diagnostics);
   return diagnostics;
 }}
@@ -6113,12 +6167,12 @@ function drawOasisDiagnostics() {{
     return;
   }}
   const diagnostics = selectedOasisDiagnostics(selected, oasisEventThreshold);
-  if (!diagnostics || !diagnostics.events.length) {{
+  if (!diagnostics || !diagnostics.waveform.length) {{
     summary.textContent = "";
     gbuEmptyPlot(c, "Time from inferred spike (s)", "dF/F", `No inferred spikes above ${{fmt(oasisEventThreshold)}} for this ROI`);
     return;
   }}
-  summary.textContent = `(${{diagnostics.events.length}} spikes above ${{fmt(oasisEventThreshold)}})`;
+  summary.textContent = `(regression on ${{diagnostics.nFrames.toLocaleString()}} frames above ${{fmt(oasisEventThreshold)}})`;
   const ctx = c.ctx, r = c.r, w = c.w, h = c.h;
   const l = 46 * r, rr = 8 * r, t = 8 * r, b = 32 * r, pw = w - l - rr, ph = h - t - b;
   const finiteWave = diagnostics.waveform.filter(Number.isFinite);
@@ -6717,6 +6771,7 @@ function syncThresholdMenu() {{
   if (document.activeElement !== allBox) allBox.value = Number.isFinite(thresholdAllValue) ? Number(thresholdAllValue.toPrecision(4)) : "";
   document.getElementById("thresholdAllUnits").textContent = oasisThresholdMode === "sd" ? "SD" : "";
   updateThresholdButton();
+  syncSpikeMetricControls();
   document.getElementById("thresholdScopeNote").textContent = thresholdScope === "all"
     ? "Every ROI uses this setting when selected and in the summary by QC label; the slider above changes it for all ROIs."
     : "Each ROI starts from its own default; the slider above changes only the selected ROI. The summary by QC label uses the defaults.";
@@ -6849,6 +6904,8 @@ function metricSpreadsheetRows() {{
       oasisEventSnr,
       oasisRiseTau,
       oasisDecayTau,
+      spikeMetricThreshold: dffMetricValue(dffMetrics, "inferred_spike_metric_threshold") ?? dffMetricValue(dffMetrics, "oasis_optimal_threshold"),
+      spikeFramesAbove: dffMetricValue(dffMetrics, "inferred_spike_frames_above_threshold"),
       customMetrics,
       fail: {{
         skew: !(passesLower(metrics.skew, filter.skewMin) && passesUpper(metrics.skew, filter.skewMax)),
@@ -6888,6 +6945,8 @@ function spreadsheetColumns() {{
     ["inferred_spike_snr", row => fmt(row.oasisEventSnr)],
     ["inferred_spike_rise_tau_seconds", row => fmt(row.oasisRiseTau)],
     ["inferred_spike_decay_tau_seconds", row => fmt(row.oasisDecayTau)],
+    ["inferred_spike_metric_threshold", row => fmt(row.spikeMetricThreshold)],
+    ["inferred_spike_frames_above_threshold", row => row.spikeFramesAbove ?? ""],
   ].map(([key, get]) => ({{key, get}}));
   for (const definition of customMetricDefinitions()) {{
     base.push({{key: `custom_${{definition.key}}`, get: row => fmt(row.customMetrics[definition.key])}});
@@ -7537,6 +7596,238 @@ function initRangeLabels() {{
   document.getElementById("applyRangeLabels").addEventListener("click", applyRangeLabels);
   refreshRangeMetricOptions();
   addRangeLabelRow();
+}}
+
+// Inferred spike SNR, rise tau and decay tau are computed by the generator at its default threshold.
+// They can be recomputed here for every ROI at the shared spike threshold (the dF/F panel's setting,
+// also shown in the Filter menu), using exactly the generator's definition.
+var spikeMetricRunning = false;  // var: read by syncThresholdMenu, which can run before this line
+function pyRound(x) {{
+  // Python's round(): halves go to the even integer, so window lengths match the generator.
+  const f = Math.floor(x), d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}}
+// Average calcium transient around inferred spikes, by regression (same definition as the generator):
+// dF/F(t) = c + sum_l k(l) s(t - l), s = 1 at frames whose inferred-spike value exceeds the threshold,
+// lags -0.5 s to +2 s. Solving for k separates overlapping events instead of averaging them together.
+function fitExponentialDecay(values, fr, baseline) {{
+  const n = values.length, t = new Float64Array(n), z = new Float64Array(n);
+  for (let i = 0; i < n; i++) {{ t[i] = i / fr; z[i] = values[i] - baseline; }}
+  const sse = tau => {{
+    let ze = 0, ee = 0;
+    for (let i = 0; i < n; i++) {{ const e = Math.exp(-t[i] / tau); ze += z[i] * e; ee += e * e; }}
+    const A = ze / ee; let s = 0;
+    for (let i = 0; i < n; i++) {{ const r = z[i] - A * Math.exp(-t[i] / tau); s += r * r; }}
+    return [s, A];
+  }};
+  const lo = Math.log(0.5 / fr), hi = Math.log(10.0), grid = [];
+  for (let i = 0; i < 200; i++) grid.push(Math.exp(lo + (hi - lo) * i / 199));
+  let best = 0, bestVal = Infinity;
+  grid.forEach((g, i) => {{ const v = sse(g)[0]; if (v < bestVal) {{ bestVal = v; best = i; }} }});
+  if (best === 0 || best === grid.length - 1) return NaN;
+  let a = Math.log(grid[best - 1]), c = Math.log(grid[best + 1]);
+  const gr = (Math.sqrt(5) - 1) / 2;
+  let x1 = c - gr * (c - a), x2 = a + gr * (c - a), f1 = sse(Math.exp(x1))[0], f2 = sse(Math.exp(x2))[0];
+  for (let it = 0; it < 40; it++) {{
+    if (f1 < f2) {{ c = x2; x2 = x1; f2 = f1; x1 = c - gr * (c - a); f1 = sse(Math.exp(x1))[0]; }}
+    else {{ a = x1; x1 = x2; f1 = f2; x2 = a + gr * (c - a); f2 = sse(Math.exp(x2))[0]; }}
+  }}
+  const tau = Math.exp((a + c) / 2);
+  return sse(tau)[1] > 0 ? tau : NaN;
+}}
+function solveLinear(M, v) {{
+  // Gaussian elimination with partial pivoting; M is an array of Float64Array rows (modified in place).
+  const n = v.length;
+  for (let col = 0; col < n; col++) {{
+    let p = col; for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[p][col])) p = r;
+    if (!(Math.abs(M[p][col]) > 1e-300)) return null;
+    if (p !== col) {{ const tm = M[p]; M[p] = M[col]; M[col] = tm; const tv = v[p]; v[p] = v[col]; v[col] = tv; }}
+    for (let r = col + 1; r < n; r++) {{
+      const f = M[r][col] / M[col][col]; if (f === 0) continue;
+      for (let k = col; k < n; k++) M[r][k] -= f * M[col][k];
+      v[r] -= f * v[col];
+    }}
+  }}
+  const x = new Float64Array(n);
+  for (let r = n - 1; r >= 0; r--) {{ let s = v[r]; for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k]; x[r] = s / M[r][r]; }}
+  return x;
+}}
+function spikeKernel(tr, sp, threshold) {{
+  const fr = Number(data.frameRate);
+  const out = {{kernel: null, lags: null, nFrames: 0, snr: NaN, rise: NaN, decay: NaN, baseline: NaN, amplitude: NaN, peak: -1}};
+  if (!tr || !sp || !Number.isFinite(fr) || fr <= 0 || !Number.isFinite(threshold)) return out;
+  const n = tr.length, pre = Math.max(2, pyRound(fr * 0.5)), post = Math.max(4, pyRound(fr * 2.0)), L = pre + post + 1;
+  const evIdx = [];
+  for (let f = 0; f < sp.length; f++) {{ const v = sp[f]; if (Number.isFinite(v) && v > threshold) evIdx.push(f); }}
+  out.nFrames = evIdx.length; out.lags = Array.from({{length: L}}, (_, j) => j - pre);
+  if (evIdx.length < 3) return out;
+  const G = Array.from({{length: L + 1}}, () => new Float64Array(L + 1)), h = new Float64Array(L + 1);
+  let finiteCount = 0, finiteSum = 0;
+  for (let t = 0; t < n; t++) if (Number.isFinite(tr[t])) {{ finiteCount++; finiteSum += tr[t]; }}
+  G[L][L] = finiteCount; h[L] = finiteSum;
+  if (finiteCount === n) {{
+    // Fast exact path (no missing dF/F). Regressor i at row t is ev[t - lag_i], with lag_i = i - pre.
+    // Kernel-constant and right-hand terms come from the event list; kernel-kernel terms from the event
+    // autocorrelation S[d] = sum_u ev[u] ev[u + d], minus the few edge rows that fall outside [0, n).
+    const ev = new Uint8Array(n); for (const e of evIdx) ev[e] = 1;
+    for (let i = 0; i < L; i++) {{
+      const lag = i - pre;
+      let cnt = 0, sum = 0;
+      for (const e of evIdx) {{ const t = e + lag; if (t >= 0 && t < n) {{ cnt++; sum += tr[t]; }} }}
+      G[i][L] = G[L][i] = cnt; h[i] = sum;
+    }}
+    const S = new Float64Array(L);
+    for (let q = 0; q < evIdx.length; q++) for (let q2 = q; q2 < evIdx.length && evIdx[q2] - evIdx[q] < L; q2++) S[evIdx[q2] - evIdx[q]] += 1;
+    for (let i = 0; i < L; i++) for (let j = i; j < L; j++) {{
+      // G[i][j] = sum over t in [0, n) of ev[t - lag_i] ev[t - lag_j]; with u = t - lag_j and d = j - i,
+      // this is sum over u of ev[u] ev[u + d] restricted to 0 <= u + lag_j < n.
+      const d = j - i, lagj = j - pre;
+      let g = S[d];
+      const lo = Math.max(0, -lagj), hi = Math.min(n - 1 - d, n - 1 - lagj);
+      for (let u = 0; u < Math.min(lo, n - d); u++) if (ev[u] && ev[u + d]) g -= 1;
+      for (let u = Math.max(hi + 1, 0); u <= n - 1 - d; u++) if (ev[u] && ev[u + d]) g -= 1;
+      G[i][j] = G[j][i] = g;
+    }}
+  }} else {{
+    // Rows with an event at frame e and lag l are t = e + l; only frames within the window of an event matter.
+    let start = 0; const active = [];
+    for (let t = 0; t < n; t++) {{
+      const y = tr[t]; if (!Number.isFinite(y)) continue;
+      while (start < evIdx.length && evIdx[start] < t - post) start++;
+      active.length = 0;
+      for (let q = start; q < evIdx.length && evIdx[q] <= t + pre; q++) active.push(t - evIdx[q] + pre);
+      if (!active.length) continue;
+      for (const i of active) {{ h[i] += y; G[i][L] += 1; G[L][i] += 1; for (const j of active) G[i][j] += 1; }}
+    }}
+  }}
+  for (let i = 0; i < L; i++) G[i][i] += 1e-6;
+  const beta = solveLinear(G, h);
+  if (!beta) return out;
+  const k = Array.from(beta.subarray(0, L));
+  out.kernel = k;
+  let b = 0; for (let i = 0; i < pre; i++) b += k[i]; b /= pre;
+  let ss = 0; for (let i = 0; i < pre; i++) ss += (k[i] - b) ** 2;
+  const sd = Math.sqrt(ss / (pre - 1));
+  let pk = pre; for (let i = pre; i < L; i++) if (k[i] > k[pk]) pk = i;
+  const amp = k[pk] - b;
+  out.baseline = b; out.peak = pk;
+  if (!(amp > 0)) return out;
+  if (sd > 0) out.snr = amp / sd;
+  const crossBefore = level => {{
+    for (let i = pk; i > 0; i--) if (k[i - 1] < level && level <= k[i]) return (i - 1) + (level - k[i - 1]) / (k[i] - k[i - 1]);
+    return NaN;
+  }};
+  const c10 = crossBefore(b + 0.1 * amp), c90 = crossBefore(b + 0.9 * amp);
+  if (Number.isFinite(c10) && Number.isFinite(c90)) out.rise = Math.max(0, c90 - c10) / fr;
+  const tail = k.slice(pk);
+  let tau = fitExponentialDecay(tail, fr, b);
+  if (Number.isFinite(tau)) {{
+    let ze = 0, ee = 0;
+    for (let i = 0; i < tail.length; i++) {{ const e = Math.exp(-i / fr / tau); ze += (tail[i] - b) * e; ee += e * e; }}
+    out.amplitude = ze / ee;
+  }} else {{
+    const target = b + amp / Math.E;
+    for (let j = 1; j < tail.length; j++) if (tail[j] <= target) {{ tau = ((j - 1) + (tail[j - 1] - target) / (tail[j - 1] - tail[j])) / fr; break; }}
+  }}
+  out.decay = Number.isFinite(tau) ? tau : NaN;
+  return out;
+}}
+function sharedThresholdUnits() {{
+  return oasisThresholdMode === "sd" ? `SD (${{SD_STATISTIC_TEXT[resolvedSdStatistic()]}})` : "raw value";
+}}
+function currentSpikeMetricSetting() {{
+  return {{mode: oasisThresholdMode, value: Number(Number(currentControlValue()).toPrecision(6)), statistic: oasisThresholdMode === "sd" ? resolvedSdStatistic() : null}};
+}}
+function sameSpikeMetricSetting(a, b) {{
+  return !!a && !!b && a.mode === b.mode && a.statistic === b.statistic && Math.abs(a.value - b.value) <= 1e-9 * Math.max(1, Math.abs(a.value));
+}}
+function spikeMetricStatusText() {{
+  if (!data.oasisAvailable) return "";
+  if (!oasisSpikes || !dff) return "Load dF/F and inferred spikes to recompute these metrics.";
+  const done = data.spikeMetricSetting;
+  const shown = done
+    ? `Metrics computed at ${{done.mode === "sd" ? `${{fmt(done.value)}} SD (${{SD_STATISTIC_TEXT[done.statistic] || done.statistic}})` : fmt(done.value)}} for every ROI.`
+    : `Metrics computed at the generator's threshold (${{fmt(Number(data.oasisEventThreshold ?? 0.05))}}).`;
+  const generatorSetting = {{mode: "absolute", value: Number(Number(data.oasisEventThreshold ?? 0.05).toPrecision(6)), statistic: null}};
+  const current = currentSpikeMetricSetting();
+  const stale = done ? !sameSpikeMetricSetting(done, current) : !sameSpikeMetricSetting(generatorSetting, current);
+  return stale ? `${{shown}} The threshold has changed since; press Recompute to update them.` : shown;
+}}
+function syncSpikeMetricControls() {{
+  const row = document.getElementById("spikeMetricThresholdRow");
+  if (!row) return;
+  row.hidden = !data.oasisAvailable;
+  const box = document.getElementById("spikeMetricThreshold");
+  box.step = oasisThresholdMode === "sd" ? 0.01 : 0.001;
+  if (document.activeElement !== box) box.value = Number(Number(currentControlValue()).toPrecision(4));
+  document.getElementById("spikeMetricThresholdUnits").textContent = sharedThresholdUnits();
+  if (!spikeMetricRunning) {{
+    const text = spikeMetricStatusText();
+    document.getElementById("spikeMetricStatus").textContent = text;
+    const menuNote = document.getElementById("spikeMetricStatusMenu");
+    if (menuNote) menuNote.textContent = text;
+  }}
+}}
+function applySharedThreshold(value) {{
+  // One setting for the dF/F panel, the summary by QC label and these metrics: it applies to all ROIs.
+  if (!Number.isFinite(value)) return;
+  thresholdScope = "all";
+  thresholdAllValue = value;
+  if (sdModeActive()) oasisThresholdK = value;
+  setOasisThreshold(defaultThresholdFor(selected));
+  syncThresholdMenu();
+  scheduleThresholdRuleUpdate();
+}}
+function recomputeSpikeMetrics() {{
+  if (spikeMetricRunning || !data.oasisAvailable) return;
+  if (!oasisSpikes || !dff) {{ syncSpikeMetricControls(); return; }}
+  applySharedThreshold(currentControlValue());
+  const setting = currentSpikeMetricSetting();
+  spikeMetricRunning = true;
+  const notes = [document.getElementById("spikeMetricStatus"), document.getElementById("spikeMetricStatusMenu")].filter(Boolean);
+  const buttons = [document.getElementById("recomputeSpikeMetrics"), document.getElementById("recomputeSpikeMetricsMenu")].filter(Boolean);
+  buttons.forEach(b => {{ b.disabled = true; }});
+  let roi = 0;
+  const step = () => {{
+    const stop = Math.min(data.nRois, roi + 100);
+    for (; roi < stop; roi++) {{
+      const threshold = defaultThresholdFor(roi);
+      const m = spikeKernel(trace(roi), spikeTrace(roi), threshold);
+      const target = data.dffMetrics[roi] || (data.dffMetrics[roi] = {{}});
+      target.oasis_event_snr = Number.isFinite(m.snr) ? m.snr : null;
+      target.oasis_rise_tau_seconds = Number.isFinite(m.rise) ? m.rise : null;
+      target.oasis_decay_tau_seconds = Number.isFinite(m.decay) ? m.decay : null;
+      target.inferred_spike_metric_threshold = Number.isFinite(threshold) ? threshold : null;
+      target.inferred_spike_frames_above_threshold = m.nFrames;
+    }}
+    notes.forEach(n => {{ n.textContent = `Recomputing inferred spike metrics: ${{roi.toLocaleString()}} of ${{data.nRois.toLocaleString()}} ROIs...`; }});
+    if (roi < data.nRois) {{ setTimeout(step, 0); return; }}
+    data.spikeMetricSetting = setting;
+    spikeMetricRunning = false;
+    buttons.forEach(b => {{ b.disabled = false; }});
+    updateMetricDefaults();
+    evaluateFilter();
+    drawMetricHistograms();
+    updateVisibleRois(false);
+    updateSortCurrent();
+    setSelected(selected);
+    syncSpikeMetricControls();
+  }};
+  step();
+}}
+document.getElementById("spikeMetricThreshold").addEventListener("input", event => applySharedThreshold(Number(event.target.value)));
+document.getElementById("spikeMetricThreshold").addEventListener("change", () => syncSpikeMetricControls());
+document.getElementById("recomputeSpikeMetrics").addEventListener("click", recomputeSpikeMetrics);
+document.getElementById("recomputeSpikeMetricsMenu").addEventListener("click", recomputeSpikeMetrics);
+if (data.spikeMetricSetting) {{
+  // A reviewer saved after recomputing reopens with the threshold its metrics were computed at.
+  oasisThresholdMode = data.spikeMetricSetting.mode === "sd" ? "sd" : "absolute";
+  if (data.spikeMetricSetting.statistic) oasisSdStatistic = data.spikeMetricSetting.statistic;
+  thresholdScope = "all";
+  thresholdAllValue = Number(data.spikeMetricSetting.value);
+  if (oasisThresholdMode === "sd") oasisThresholdK = thresholdAllValue;
 }}
 makeOverlays(); syncTimeInputs(); renderCustomMetricControls(); renderCustomSortMetrics(); updateSortMetricHandlers(); updateMetricDefaults(); updateCellTypeLabelStatus(); updateRoiDisplaySummary();
 const initialFilterSet = data.initialFilterSet && (customPresets[data.initialFilterSet] || data.morphologyPresets[data.initialFilterSet]) ? data.initialFilterSet : "all_rois";
