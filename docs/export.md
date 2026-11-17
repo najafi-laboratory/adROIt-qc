@@ -48,6 +48,8 @@ back to its ROI, and uploaded metrics added later are included until you untick 
 | `footprint`, `skew`, `aspect_ratio`, `compact`, `connectivity`, `roi_area_px` | [Morphology and trace metrics](metrics.md) |
 | `snr_95_50`, `caiman_exceptional_event_snr` | Trace SNR metrics |
 | `inferred_spike_snr`, `inferred_spike_rise_tau_seconds`, `inferred_spike_decay_tau_seconds` | Inferred spike metrics |
+| `inferred_spike_metric_threshold` | The spike threshold those metrics were computed at for that ROI (the generator default, or the value used by **Recompute inferred spike metrics**) |
+| `inferred_spike_frames_above_threshold` | The number of frames above that threshold, which the transient estimate used |
 | `custom_NAME`, `custom_NAME_label` | Each uploaded metric; the `_label` column holds the names of a categorical variable's codes |
 | `reason` | The active thresholds the ROI failed |
 

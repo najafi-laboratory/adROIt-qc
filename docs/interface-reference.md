@@ -39,9 +39,10 @@ labeled Bad count as Bad.
       then the mean ± s.e.m. of those per-ROI averages across ROIs, so each ROI counts
       once. Windows whose baseline-subtracted dF/F exceeds 20 in magnitude are left out,
       since values that large come from near-zero baselines rather than calcium.
-    - <a id="inferred-spike-fit-panel"></a>*Selected ROI:* the same average for the
-      selected ROI alone, with an exponential decay fit (red); its tau is the time to
-      fall to 1/e of the peak.
+    - <a id="inferred-spike-fit-panel"></a>*Selected ROI:* the selected ROI's transient
+      estimated by regression (see [Inferred spike metrics](#inferred-spike-metrics)),
+      with the fitted exponential decay in red. It is the same estimate the inferred
+      spike metrics use, so the tau shown is the ROI's inferred spike decay tau.
 
 The firing-rate and transient plots need dF/F and inferred spikes; until both are
 loaded a short message says what is missing. The label groups use each ROI's default
@@ -236,16 +237,48 @@ and the [Metric reference](metrics.md).
 
 ### Inferred spike metrics
 
-Computed by the generator from dF/F windows around frames whose inferred-spike value is
-above the ROI's default threshold, so they need only an ROI-by-frame spike array, from any
-method.
+All three come from one estimate of the ROI's average calcium transient. They need only
+an ROI-by-frame inferred-spike array, from any method.
 
-- **Inferred spike SNR:** (peak of the averaged transient − mean of its pre-event
-  baseline) ÷ SD of that baseline, from windows 0.5 s before to 2 s after each event, with
-  at least 3 complete windows. Because the baseline SD is of the averaged waveform, it
-  grows with the number of events.
-- **Rise tau:** time between the 10% and 90% crossings of the average event.
-- **Decay tau:** time from the average event's peak to 1/e of its amplitude.
+**The transient estimate.** Let *s*(*t*) be 1 at every frame whose inferred-spike value is
+above the threshold and 0 otherwise. The ROI's dF/F is modelled as a constant plus one
+copy of an unknown transient *k* placed at every such frame:
+
+dF/F(*t*) = *c* + sum over lags ℓ of *k*(ℓ) · *s*(*t* − ℓ), with ℓ from −0.5 s to +2 s.
+
+The 76 values of *k* (at 30 Hz) and the constant *c* are found by least squares. Where two
+events overlap the model adds their transients, so each is assigned to the right lag
+rather than piled into one average. A plain event-triggered average is the true transient blurred by
+how events cluster in time, which distorts the decay when events come in bursts. In
+simulated recordings with known decay times, the regression estimated decay tau to within
+about 5% (median) for both independent and bursting spikes, against 6% and 18% for an
+event-triggered average. At least 3 frames above the threshold are needed.
+
+- **Inferred spike SNR:** (peak of *k* − mean of *k* before the event) ÷ SD of *k* before
+  the event. The pre-event values of *k* should be near zero, so their spread measures
+  how noisy the estimate is; the SNR grows with the number of events.
+- **Rise tau:** time between the 10% and 90% crossings on the rising side of *k*, found
+  backwards from the peak and interpolated between frames.
+- **Decay tau:** *k* from its peak is fitted with *b* + *A* exp(−*t*/τ), where *b* is the
+  mean of *k* before the event; τ is the decay tau (searched from half a frame to 10 s).
+  If no fit is found, the interpolated time to fall to 1/e of the amplitude is used.
+
+One inferred spike often spreads over several frames, and each such frame gets its own
+copy of *k*. The shape and the time constants are unaffected, but the height of *k* is
+an amplitude per frame above threshold, smaller than a whole transient. The spreadsheet's
+`inferred_spike_frames_above_threshold` column gives the number of frames each ROI's
+estimate used.
+
+**Recomputing at another threshold.** The generator computes these at its default
+threshold. The **Spike threshold** field at the top of this section and the dF/F panel's
+spike threshold are one setting: changing either changes the other and applies it to every
+ROI, in raw values or per-ROI SD units. **Recompute inferred spike metrics**, here or in the
+dF/F panel's threshold menu, recalculates all three metrics for every ROI at that setting
+with the same definitions, then updates the filters, distributions, sort order and
+spreadsheet. A note under the button says which threshold the current values were computed
+at, and warns when the threshold has changed since. The spreadsheet's
+`inferred_spike_metric_threshold` column records the threshold used for each ROI, and
+**Save current state into HTML** keeps the recomputed values and the threshold.
 
 ### Cell identity labels
 
