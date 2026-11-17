@@ -61,7 +61,9 @@ python scripts/validate_inputs.py data/my_session
 ```
 
 Then set `input_layout: external_rois` in your configuration and build as above.
-[Preparing Your Inputs](inputs.md) documents every file the layout accepts.
+[Preparing your inputs](inputs.md) documents every file the layout accepts, and
+[Converting from CaImAn](inputs.md#converting-from-caiman) walks through a CaImAn
+result.
 
 ## Open the result
 
@@ -69,18 +71,18 @@ Open `outputs/my_session/<name>_interactive_fov_roi_dff.html` in any browser.
 
 !!! warning "Keep the sidecars with the HTML"
     For a large session the dF/F and inferred-spike arrays are written beside the HTML
-    as `<name>_dff.npy` and `<name>_oasis_spikes.npy`. Move or email the whole
+    as `<name>_dff.npy` and `<name>_inferred_spikes.npy`. Move or email the whole
     directory, not the HTML alone. If the arrays are missing, the reviewer still opens
     and the trace panels report that they are not loaded.
 
-### Whether the sidecars load automatically
+### Whether the sidecars load automatically {#whether-the-sidecars-load-automatically}
 
 That depends on how the page is opened, not on the reviewer:
 
 | How you open the HTML | Address starts with | Sidecars |
 |:---|:---|:---|
 | Through a web server, for example `python -m http.server` run in the folder | `https://` or `http://` | Load automatically, as long as they sit in the same folder as the HTML |
-| By double-clicking it, or from any downloaded, copied or mounted folder | `file://` | Not loaded. Browsers do not let a page opened from disk read files beside it, so select them with **Load dF/F file** and **Load inferred spikes file** |
+| By double-clicking it, or from any downloaded, copied or mounted folder | `file://` | Not loaded. Browsers do not let a page opened from disk read files beside it, so select them with **Load dF/F** and **Load inferred spikes** |
 
 To serve a folder on your own machine, so both arrays load by themselves:
 
@@ -90,5 +92,19 @@ python -m http.server 8000
 # then open http://localhost:8000/<name>_interactive_fov_roi_dff.html
 ```
 
-The note under the two load buttons says which case applies. Sessions small enough to
-embed their arrays have no sidecars and open the same way from anywhere.
+The dF/F panel's **(i)** popover says which case applies and whether each array loaded.
+Sessions small enough to embed their arrays have no sidecars and open the same way from
+anywhere; `--force-embed true` makes any session self-contained
+([details](cli-mapping.md#embedded-or-separate-trace-arrays)).
+
+## Check an installation
+
+The repository's test suite builds small synthetic sessions in every input layout and
+checks that each input reaches the reviewer unchanged and each output reads back:
+
+```bash
+pip install pytest
+pytest -q tests                      # browser tests are skipped without Playwright
+pip install playwright && python -m playwright install chromium
+pytest -q tests                      # now also opens the page in a headless browser
+```

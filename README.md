@@ -48,6 +48,18 @@ python scripts/build_reviewer.py config/my_session.yaml
 The output directory receives the reviewer HTML, the static summary PDF, and a
 `run.json` recording the exact command, so any example here can be regenerated.
 
+## Tests
+
+```bash
+pip install pytest playwright && python -m playwright install chromium
+pytest -q tests
+```
+
+The suite builds synthetic sessions in every input layout and checks that each input
+reaches the reviewer unchanged and in ROI order, that every output reads back, and that
+the page opens, uploads and exports correctly in a headless browser. CI runs it on every
+push.
+
 ## Starting from a clean slate
 
 Everything lab-specific is confined to two directories, both named `demo`:
@@ -57,7 +69,7 @@ rm -rf config/demo data/demo scripts/fetch_demo_data.py
 ```
 
 Nothing outside them refers to a particular recording. `config/template.yaml`,
-the three scripts and the CI workflow are generic.
+the scripts, the tests, the CaImAn example and the CI workflow are generic.
 
 ## If your data did not come from Suite2p
 
@@ -89,12 +101,13 @@ python scripts/validate_inputs.py data/my_session
 | `F.npy`, `Fneu.npy` | raw fluorescence and neuropil, `(n_rois, n_frames)` float32, C-ordered |
 | `dff.h5` (dataset `dff`), `spikes.h5` (dataset `spikes`) | optional precomputed dF/F and inferred spike amplitudes, `(n_rois, n_frames)` float32. These two are read from HDF5, not `.npy`; a `.npy` of either name is ignored, which `validate_inputs.py` reports as an error |
 | `mean_func.npy` | optional functional mean image, `(Ly, Lx)` |
-| `roi_cell_type_labels.npy` | optional per-ROI codes: −1 excitatory, 0 unsure, 1 inhibitory, NaN unknown |
+| `roi_cell_type_labels.npy` | optional per-ROI cell type codes: −1 excitatory, 0 unsure, 1 inhibitory, NaN unknown |
 | `external_roi_metadata.json` | `image_shape` and `flatten_order`, needed for sparse components without an image |
 
 Sparse `(pixels, n_rois)` component matrices from CaImAn-style pipelines are
 accepted directly as `spatial_components.npz`; supply `flatten_order: "F"`
-unless your pixel indices are row-major.
+unless your pixel indices are row-major. `examples/caiman/` runs CaImAn on raw
+TIFFs and converts its result into this layout.
 
 **The one thing no tool can check for you** is whether mask label *k* really
 belongs to trace row *k−1*. A mismatch produces a reviewer in which every mask
@@ -118,6 +131,8 @@ them into `data/demo/` once the archive record is set at the top of that script.
 config/
   template.yaml              commented starting point, one per session
   demo/                      lab-specific examples; delete for a clean start
+examples/caiman/             CaImAn run and CaImAn-to-reviewer converter
+tests/                       validation suite: every input and output, and the page in a browser
 scripts/
   build_reviewer.py          config -> reviewer, writes run.json
   make_standard_inputs.py    arbitrary segmentation output -> documented layout

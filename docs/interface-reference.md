@@ -1,339 +1,291 @@
 # Interface reference
 
-Each **Read more** box in the reviewer gives a two-sentence summary and links to
-the matching section below, which has the full description.
+Every panel, menu card and menu section in the reviewer has an **(i)** icon in its
+top-right corner (beside the title on the full-width stacked-trace and motion panels).
+It opens a short bulleted summary that links to the matching section below. The
+sections follow the page from top to bottom, then the menu cards on the right.
 
-## Inferred spike fit panel
+## Field of view
 
-- **Average transient:** the selected ROI's dF/F windows around inferred spikes,
-  baseline-subtracted and averaged.
-- **Exponential model:** a decay curve drawn from the average transient's peak
-  using the empirical decay tau. That tau is the time the average transient
-  takes to fall to 1/e of its peak amplitude.
-- **Threshold:** only frames whose inferred-spike value is above the selected
-  threshold contribute to the average transient.
+- Each image is the session's mean frame for one channel, with every visible ROI
+  outlined in its current label's color. The anatomical panel's **Overlay** menu picks
+  which ROI set it draws.
+- Click an ROI to select it; every linked panel follows.
+- Ctrl/⌘ + scroll or a trackpad pinch zooms, drag pans, and double-click resets. A plain
+  scroll always scrolls the page.
+- The corner icon or the divider beside the summary column resizes the field of view;
+  double-click either to return to the default size. A size you drag to is remembered.
 
-The panel can be hidden with its **Hide** button and shown again from the dF/F
-panel.
+The image inputs are listed in [Mean images](inputs.md#mean-images).
 
-## Inferred spike threshold
+## Summary by QC label {#summary-of-good-bad-and-unsure-rois}
 
-Inferred spikes are loaded as an ROI-by-frame array. The viewer requires only that
-array's shape, so it can hold any per-frame spike estimate from any method:
-deconvolved amplitudes (for example from Suite2p's OASIS), spike probabilities
-(for example from CASCADE), or 0/1 event indicators. The reviewer says
-which method produced the array when the file records it.
+The column beside the field of view groups every ROI in the session by its current
+label and updates as you label. It is visible when the reviewer opens; **Hide** closes
+it and the **Show summary by QC label** tab brings it back. ROIs that a metric filter
+labeled Bad count as Bad.
 
-The threshold is a cutoff applied in the viewer, in the units of that array. Frames
-whose value is above it are drawn as red dots on the dF/F trace and are used for the
-average transient and the decay and rise taus, so set it to suit the method: for
-example 0.5 for spike probabilities or 0/1 events. For Suite2p and OASIS output, see
-[Suite2p's spike deconvolution documentation](https://suite2p.readthedocs.io/en/latest/deconvolution/)
-and the [original OASIS paper](https://doi.org/10.1371/journal.pcbi.1005423).
+- **ROIs by label:** the count and share of all ROIs with each label (Good, Bad, Unsure,
+  Not labeled).
+- **Firing rate by label:** a kernel density estimate of the per-ROI firing rates for
+  each label. An ROI's firing rate is its number of inferred spikes above threshold,
+  counted at least 0.25 s apart, divided by the analyzed recording time, in events per
+  second. The curves use a Gaussian kernel with Silverman's bandwidth, reflected at zero,
+  and each has area 1 so labels compare by shape; the dashed line marks each label's
+  median.
+- **Average transient**, with a **By label** / **Selected ROI** switch:
+    - *By label:* each ROI's spike-triggered average dF/F (windows from 0.5 s before to 2 s
+      after each spike, each with the median of its own pre-spike part subtracted),
+      then the mean ± s.e.m. of those per-ROI averages across ROIs, so each ROI counts
+      once. Windows whose baseline-subtracted dF/F exceeds 20 in magnitude are left out,
+      since values that large come from near-zero baselines rather than calcium.
+    - <a id="inferred-spike-fit-panel"></a>*Selected ROI:* the same average for the
+      selected ROI alone, with an exponential decay fit (red); its tau is the time to
+      fall to 1/e of the peak.
 
-## Loading dF/F and inferred spike files
+The firing-rate and transient plots need dF/F and inferred spikes; until both are
+loaded a short message says what is missing. The label groups use each ROI's default
+threshold, or the threshold set for every ROI when **Default for all ROIs** is set to
+the same setting for every ROI (see [Inferred spike threshold](#inferred-spike-threshold)).
+The selected-ROI transient follows the threshold as you move it.
 
-The dF/F panel's single **Read more** box covers this section and
-[Inferred spike threshold](#inferred-spike-threshold).
+## Selected ROI trace
 
-For larger sessions the dF/F and inferred-spike arrays are stored beside the
-HTML rather than inside it. Opened through a web address they load
-automatically; opened from disk, select them with **Load dF/F file** and **Load
-inferred spikes file** (see
-[Whether the sidecars load automatically](quickstart.md#whether-the-sidecars-load-automatically)).
+The dF/F trace of the selected ROI, with inferred spikes above threshold drawn as red
+dots when **Show Inferred Spikes** is checked. Ctrl/⌘ + scroll or pinch zooms time, drag
+pans, and the **Start s** / **End s** fields set the window, which the motion panels
+follow. The panel's (i) popover holds this section's summary and the loading status of
+the two arrays.
 
-Each file is a NumPy `.npy` array with one row per ROI, in original-index order,
-and one column per frame, and both must have the same shape. Rows must be
-C-ordered (each row one contiguous time series) and little-endian float32, or
-float64, which is converted on load. To have them load automatically, name them
-`SESSION_dff.npy` and `SESSION_oasis_spikes.npy`, with the reviewer's session
-name.
+### Inferred spike threshold
+
+The inferred-spike array can hold any per-frame estimate from any method: deconvolved
+amplitudes (for example Suite2p's OASIS or CaImAn's `S`), spike rates or probabilities
+(for example CASCADE), counts, or signed values. The threshold is a cutoff in the units
+of that array. Frames above it are the red dots and feed the average transient, its taus
+and the firing rate.
+
+**Spike threshold** (the button shows the current value) opens a menu with:
+
+- **The slider and value box**, with the value converted to the other unit beside them.
+- **Units:** **Raw values** of the array, or **SD**, *k* standard deviations. An SD
+  threshold is center + *k* × scale of the selected ROI's own values, computed separately
+  for each ROI and never pooled across the session, so one *k* gives each ROI its own
+  threshold.
+- **SD measured as**, to suit the array's format:
+
+    | Choice | Center and scale | Suits |
+    |:---|:---|:---|
+    | Non-zero values | mean and SD of the ROI's non-zero values | sparse non-negative output (OASIS, Suite2p, CaImAn `S`, counts) |
+    | All frames | mean and SD of every frame | dense rates or probabilities (CASCADE) |
+    | Robust | median and 1.4826 × median absolute deviation of every frame | signed or noisy output |
+    | Auto | chosen from the session: robust if more than 1% of values are negative, non-zero if more than half are zero, otherwise all frames | |
+
+  An ROI with too few distinct values for an SD falls back to its raw-value threshold.
+- **Default for all ROIs:** either each ROI's own default (the generator's per-ROI value;
+  the slider then changes only the selected ROI), or one setting for every ROI, in the
+  current units, applied on selection and in the summary column (the slider then sets it
+  for all ROIs).
+- **Reset selected ROI to default.**
+
+The [inferred spike metrics](#inferred-spike-metrics) in the Filter menu are computed by
+the generator at each ROI's default threshold, so this menu does not change them. For
+Suite2p and OASIS see
+[Suite2p's deconvolution documentation](https://suite2p.readthedocs.io/en/latest/deconvolution/)
+and the [OASIS paper](https://doi.org/10.1371/journal.pcbi.1005423).
+
+### Loading dF/F and inferred spike files
+
+Small sessions carry both arrays inside the HTML. Larger ones keep them beside it as
+`SESSION_dff.npy` and `SESSION_inferred_spikes.npy` (see
+[Embedded or separate trace arrays](cli-mapping.md#embedded-or-separate-trace-arrays)).
+Opened through a web server they load automatically; opened from disk, choose them with
+**Load dF/F** and **Load inferred spikes** ([why](quickstart.md#open-the-result)). Show
+Inferred Spikes and the threshold menu appear once spikes are loaded.
+
+Each file is a NumPy `.npy` array, one row per ROI in original-index order and one
+column per frame, both the same shape, C-ordered little-endian float32 (float64 is
+converted on load):
 
 ```python
 import numpy as np
-# one row per ROI in original-index order, one column per frame
-np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))            # (n_rois, n_frames)
-np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape
+np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))                 # (n_rois, n_frames)
+np.save("SESSION_inferred_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))  # same shape
 ```
 
-## Original index and sort position
+## Stacked traces
 
-The **Original Index** is the ROI's fixed identifier. It is 0-indexed, like
-every input and output file the generator reads and writes. ROI *k* is row *k*
-of each of these files:
+- One dF/F trace per visible ROI, in the current sort order, sharing the selected ROI's
+  time window. Two rows carrying the same events are usually two ROIs sharing a source.
+- **First ROI** and **Last ROI** choose which sort positions are drawn; **Show all
+  visible traces** draws every visible ROI.
+- Ctrl/⌘ + scroll or pinch zooms time; double-click resets.
 
-- the session files `stat.npy`, `F.npy`, `Fneu.npy`, `iscell.npy`, `dff.h5` and
-  `spikes.h5`;
-- the `_dff.npy` and `_oasis_spikes.npy` sidecars;
-- the exported `roi_manual_labels.npy`.
+## Motion correction
 
-The same number appears in the `roi_index` column of the exported metric CSV,
-and it is what `roi_index` means in uploaded metric and cell identity files.
-With N ROIs it runs from 0 to N − 1, so the last of 225 ROIs is 224.
+The top plot shows the rigid x and y shift of each frame in the current time window, in
+pixels; the bottom plots show the distribution of shifts over the session. A trace that
+looks odd at one moment is often from a session that moved then. The input format is in
+[Motion offsets](inputs.md#motion-offsets).
 
-For masks from other segmentation software, the index is the ROI's row after
-the mask labels are sorted in ascending order, not the label value stored in
-the mask (see [Dense label masks](inputs.md#dense-label-masks)).
+## Labeler
 
-The **sort position** counts from 1 within the ROIs currently shown, in the
-current sort order. It changes when you sort, filter or hide labels; the
-original index never does. Type an original index in the box to jump to that
-ROI.
+Good, Bad, Unsure and Not labeled, by button or with the G, B, U and N keys; the left and
+right arrows step through the visible ROIs in the current sort order. **Show ROIs**
+restricts the visible ROIs by label (for a second pass over the unsure ones), applied
+after the metric filters.
 
-## Summary of good, bad and unsure ROIs
+### Original index and sort position
 
-These plots group every ROI in the session by its current label and update as
-you label. ROIs that a metric filter labeled Bad are counted as Bad. The panel
-is hidden when a reviewer opens; show it with **Show Summary by QC Label** at
-the top of the dF/F panel, and hide it again with its **Hide** button.
+The **Original Index** is the ROI's fixed identifier. It is 0-based, like every file the
+generator reads and writes: ROI *k* is row *k* of `stat.npy`, `F.npy`, `Fneu.npy`,
+`iscell.npy`, `dff.h5`, `spikes.h5`, the `_dff.npy` and `_inferred_spikes.npy` files and
+the exported `roi_manual_labels.npy`, and *k* in every `roi_index` column. With N ROIs it
+runs from 0 to N − 1. For masks from other software it is the ROI's row after the mask
+labels are sorted (see [Dense label masks](inputs.md#dense-label-masks)), and for CaImAn
+it is the component number.
 
-- **Fraction of ROIs by label:** the share of all ROIs in the session with each
-  label (Good, Bad, Unsure and Not labeled), with the count above each bar.
-- **Average calcium transient by label:** each ROI's average dF/F transient,
-  computed as in the inferred spike fit panel:
-    - spikes are those above that ROI's default amplitude threshold, counted at
-      least 0.25 s apart;
-    - each spike's window runs from 0.5 s before to 2 s after it;
-    - each window has the median of its own pre-spike part subtracted.
+The **sort position** counts from 1 within the ROIs currently shown, in the current sort
+order, and changes when you sort, filter or hide labels. Type an original index in the
+box to jump to that ROI.
 
-    The line is the mean of those per-ROI averages for each label. The band is
-    the standard error of the mean across ROIs, so each ROI counts once however
-    many spikes it has. Event windows whose baseline-subtracted dF/F exceeds 20
-    in magnitude are left out of the average, as in the multi-session QC
-    summary. Values that large come from near-zero baselines rather than
-    calcium signals, and a few of them would otherwise set the scale for the
-    whole label. Those events still count toward the firing rate. ROIs with no
-    spike above their threshold, or with every window left out, have no
-    transient; the note above the plots gives the counts.
-- **Firing rate by label:** a kernel density estimate of the per-ROI firing
-  rates for each label. An ROI's firing rate is its number of inferred spikes
-  above threshold (counted as above) divided by the analyzed recording time, in
-  events per second.
-    - The curves use a Gaussian kernel with Silverman's bandwidth, reflected at
-      zero because rates cannot be negative.
-    - Each curve has area 1, so labels with different numbers of ROIs compare
-      by shape rather than height.
-    - The dashed line marks each label's median.
-    - The x-axis runs to about the 99.5th percentile of all labeled ROIs.
-    - A label whose ROIs all share one rate is drawn as a solid line at that
-      rate.
+### Assigning labels to metric ranges
 
-The two lower panels need dF/F and inferred spikes. They are computed once both
-are loaded and then only regrouped as labels change. Changing the amplitude
-threshold for the selected ROI does not change them.
+The **Bulk labeling menu** labels every visible ROI at once (**Label all visible ROIs
+as ...**, including Not labeled) or labels ROIs from ranges of one metric:
 
-## Filter sets
+- **Metric:** any numeric metric, including uploaded ones.
+- **Assign good/bad/unsure labels** sets Good, Bad, Unsure or Not labeled, as the keys do;
+  **Only change ROIs that are not labeled** protects labels you have already set.
+- **New variable** instead stores each ROI's range number (1 for the first range, 2 for
+  the second, blank outside every range) as a categorical variable with the name you
+  give, keeping each range's name. It appears under **Uploaded ROI Metrics** in the
+  **Filter ROIs** and **Sort filtered ROIs** menus and in the spreadsheet export.
+- **The plot** is the metric's distribution. The highlighted range row's min and max are
+  drawn on it and can be dragged; the other ranges are shaded in their label's color.
+- **Ranges** need a minimum, a maximum or both (a blank side is open), have inclusive
+  bounds, and are checked from the top; an ROI takes the first range it falls in. ROIs
+  outside every range, or with no value, are left unchanged.
+- Neither option depends on the threshold filters or needs **Apply Filters**.
 
-A **filter set** is a named group of threshold values for the metric filters.
-Choosing one fills in its thresholds, and any field can then be changed. The
-built-in filter sets are `all_rois` (no thresholds), `soma`, `dendrite` and
-`dendrite_relaxed`. Filter sets you save or import are listed with "(saved)".
+## Filtering ROIs {#filtering-rois}
 
-Filters are conjunctive: an ROI passes only if it meets every threshold that is
-set, so all conditions are combined with AND. A blank field is not used.
+**Filter ROIs** opens the threshold menu. Editing a field immediately previews how many
+ROIs pass; **Apply Filters** then labels every failing ROI Bad and passing ROIs Not
+labeled. After manual labeling, refresh the view with a sort rather than pressing Apply
+Filters again, which would reset those labels. An ROI passes only if it meets every
+threshold that is set; a blank field is not used. The spreadsheet's `reason` column
+records which thresholds each ROI failed.
 
-Filter sets can also be loaded when the reviewer is generated. Export one with
-**Export current filter/sorting settings JSON** under View and Export, then pass
-the file with `--filter-settings` or the `filter_settings` field of a YAML
-config (see [Saving and importing filter sets](#saving-and-importing-filter-sets)).
+### Filter sets
 
-## Metric distributions
+A **filter set** is a named group of thresholds. Choosing one in **Filter set name**
+fills in its values, and any field can then be changed; **Restore selected filter set**
+resets them. The built-in sets are `all_rois` (no thresholds), `soma`, `dendrite` and
+`dendrite_relaxed`; sets you save or import are marked "(saved)". A build can open on any
+of them with [`--filter-set` or `--filter-settings`](cli-mapping.md#every-setting).
 
-The plot beside each metric's threshold fields is a histogram of that metric
-across all ROIs in the session, over its 1st to 99th percentile range. Plots are
-shown by default; click **Distribution** above a plot to hide it.
+### Metric distributions
 
-Vertical lines show where each field's threshold is, and they move as you type:
+Each metric's panel is titled with its name and shows a histogram of that metric across
+all ROIs, over its 1st to 99th percentile range, above its **Min** and **Max** fields.
 
-- A threshold you have entered is a **solid** line, green for a minimum and red
-  for a maximum, labeled `min` or `max` with its value.
-- A field that is not used shows its starting value as a **dashed gray** line,
-  labeled with where that value comes from (`filter set`, `mean`, `25th pct` or
-  `75th pct`). It is only a guide and filters nothing until a value is entered.
-  When a minimum and a maximum start from the same value, one line is drawn.
-- A value outside the plotted range is pinned to the nearer edge, with an arrow
-  pointing toward it.
+- For numeric metrics, the mean is a dark dotted line and the 25th and 75th percentiles
+  are dashed gray lines.
+- An unused min or max sits on its percentile line. Select or drag it and it becomes that
+  threshold, drawn solid (green for a min, red for a max), with the field filled in;
+  dragging a set line adjusts it.
+- Double-click a set line to remove it, the same as leaving the field empty (Not Used).
+- The text under the plot counts the ROIs below the min, between, and above the max as
+  you adjust them.
+- Click the plot away from the lines for a purple line reporting a value's percentile and
+  how many ROIs fall below and at or above it. **Summary statistics** lists the count,
+  minimum, quartiles, median and maximum.
+- A value outside the plotted range is pinned to the nearer edge with an arrow.
 
-A purple line can be dragged across each plot. Below the plot it reports the
-line's value, its percentile in the session, and how many ROIs fall below it and
-at or above it, out of those with a value for the metric. It starts at the median
-and double-clicking the plot returns it there. It only reads the distribution and
-does not change any threshold. **Summary statistics**, under the readout, expands
-to list the number of ROIs with a value, the minimum, 25th percentile, median, 75th
-percentile and maximum.
+### Morphology metrics
 
-The starting value is, in order of preference:
+- **ROI area:** the number of pixels in the ROI, each counted once whatever its weight
+  (`xpix` for Suite2p, labeled pixels of a dense mask, nonzero pixels of a sparse
+  component).
+- **Aspect ratio:** Suite2p's `aspect_ratio`: a 2-D Gaussian fitted to the ROI's weighted,
+  soma-cropped pixels gives 2 × r_major / (r_major + r_minor + 0.01), about 1 for a round
+  ROI and approaching 2 for an elongated one.
+- **Compactness:** Suite2p's `compact`: the mean distance of the soma-cropped pixels from
+  the ROI's center, divided by that of an ideal disk with the same number of pixels,
+  minimum 1. A disk scores 1.
+- **Connectivity:** the number of separate 4-connected pixel groups.
 
-1. The threshold in the loaded filter set.
-2. Otherwise, a statistic of this session:
-    - the mean for skew, aspect ratio, compactness, both SNRs, inferred spike
-      SNR and the ROI model probability minimum;
-    - the 25th and 75th percentiles for ROI area, inferred spike rise and
-      decay tau and uploaded ROI metrics;
-    - the 75th percentile for connectivity.
-
-The value in parentheses beside a field is the one its line uses.
-
-## Cell identity labels
-
-Cell identity labels are cell-type labels (for example excitatory/inhibitory)
-or compartment labels (for example soma/axon). Check one or more identities to
-keep only ROIs with those labels; if none are checked, the filter is not used.
-
-Labels are read from the session's pipeline outputs when present. They can also
-be uploaded with **Upload Custom ROI Metrics/Cell Identity Labels** as a CSV,
-TSV or TXT table or a JSON list. Give an integer code column, a name column, or
-both: `cell_identity_code` and `cell_identity_label`. Legacy cell-type files
-use `-1` excitatory/non-red, `0` unsure and `1` inhibitory/red; other files may
-use any integer codes, with names supplied by the file.
-
-`roi_index` is the ROI's 0-based original index (see
-[Original index and sort position](#original-index-and-sort-position)). It is
-optional: without it, row *k* is ROI *k* and the file needs exactly one row per
-ROI. No other name is accepted for this column. The file formats are given in
-[Upload file formats](cli-mapping.md#upload-file-formats).
-
-## ROI model probability
-
-ROI model probability is the trained classifier's output for p(good ROI),
-loaded from `roi_model_scores.h5` when available. The currently registered
-model was trained for cerebellar dendrite ROIs only. Treat it as a suggestion
-specific to that target, not a general ROI quality score for other structures.
-Its filter has a minimum only.
-
-By default the scores are suggestions for filtering and sorting, and they do
-not label ROIs when the page opens. If the reviewer was generated with label
-initialization enabled, ROIs open with these labels:
-
-- **Good** for a probability at or above the good threshold;
-- **Bad** for a probability at or below the bad threshold;
-- **Unsure** for probabilities between the two.
-
-To label ROIs from score ranges in the open reviewer, use
-[Assign Labels to Metric Ranges](#assigning-labels-to-metric-ranges).
-
-## Uploaded ROI metrics
-
-Uploaded ROI metrics are your own per-ROI values. They can be files given with
-`--custom-roi-metrics` when the reviewer is generated, or QC metric files
-uploaded with **Upload Custom ROI Metrics/Cell Identity Labels**. Every column
-other than `roi_index` becomes a metric named after its header. Values must be
-numbers, with blanks or `NaN` where missing. `roi_index` is optional, as for
-cell identity labels. The accepted CSV, JSON and NumPy forms are given in
-[Upload file formats](cli-mapping.md#upload-file-formats).
-
-An uploaded metric stays in the Uploaded ROI Metrics section unless you move it
-with its **Section** menu. That menu can place it under any section of the
-Filter menu and the matching group of the Sort menu. The section can also be
-set when the reviewer is generated, with
-`--custom-roi-metric-section NAME=SECTION` or the `custom_roi_metric_sections`
-field of a YAML config.
-
-## Morphology metrics
-
-- **ROI area:** the number of pixels in the ROI's mask, each pixel counted once
-  whatever its weight.
-    - For Suite2p ROIs these are the pixels listed in `stat.npy` (`xpix`),
-      including any that Suite2p's soma crop leaves out of its shape
-      statistics.
-    - For masks from other software they are the pixels carrying the ROI's
-      label in a dense label mask, or its nonzero pixels in a sparse
-      spatial-component matrix.
-- **Aspect ratio:** Suite2p's `aspect_ratio`. A two-dimensional Gaussian is
-  fitted to the ROI's weighted pixels. When Suite2p's `soma_crop` option is on,
-  the default, only the soma-cropped pixels are used. The ratio is
-  2 × r_major / (r_major + r_minor + 0.01), from the radii of the fitted
-  ellipse. It is about 1 for a round ROI and approaches 2 for a very elongated
-  one.
-- **Compactness:** Suite2p's `compact`. It is the mean distance of the ROI's
-  soma-cropped pixels from their median position, divided by the mean distance
-  for an ideal disk with the same number of pixels, with a minimum of 1. A disk
-  scores 1 and less compact shapes score higher.
-- **Connectivity:** the number of separate groups of connected pixels in the
-  ROI's mask. ROIs with several disconnected pixel groups may indicate poor
-  segmentation.
-
-For Suite2p ROIs, aspect ratio and compactness are read from `stat.npy`. For
-masks from other software the generator computes them the same way, with the
-same soma crop. A binary label mask gives every pixel the same weight, whereas
-Suite2p ROIs and sparse spatial components carry per-pixel weights. Values for
-binary masks are therefore close to, but not identical with, what Suite2p would
-report. An external `stat.npy` keeps the values it has. See also
-[Suite2p's stat.npy field definitions](https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields)
+For Suite2p ROIs, aspect ratio and compactness are read from `stat.npy`. For masks from
+other software the generator computes them the same way and matches Suite2p exactly
+given the same pixel weights and ROI centers. Binary masks carry no weights, and no mask
+format carries Suite2p's detection center (the generator centers the soma crop on the
+median pixel), so values for such masks are close to, not identical with, Suite2p's.
+Suite2p's `footprint` (a detection-scale index) is not defined for them. See
+[Suite2p's stat.npy fields](https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields)
 and the [Metric reference](metrics.md).
 
-## Fluorescence trace metrics
+### Fluorescence trace metrics
 
-- **Skew:** Suite2p's `skew`, the skewness of the ROI's trace. It is a trace
-  activity field, not a shape field
-  ([Suite2p stat.npy fields](https://suite2p.readthedocs.io/en/latest/outputs/#statnpy-fields)).
-- **SNR: 95/50 percentile:** a robust transient amplitude, the 95th minus the
-  50th percentile of dF/F, divided by the residual noise
-  ([calculation code](https://github.com/najafi-laboratory/2p_imaging/blob/main/utils_2p/roi_labels.py)).
-- **SNR: CaImAn (large-transient score):** an exceptional-event score; larger
-  values indicate stronger large-transient structure
-  ([source code](https://github.com/farznaj/imaging_decisionMaking_exc_inh/blob/master/imaging/evaluate_components.py)).
+- **Skew:** Suite2p's `skew`, the skewness of the ROI's trace; a trace activity field,
+  not a shape field.
+- **SNR: 95/50 percentile:** the 95th minus the 50th percentile of dF/F, divided by the
+  residual noise.
+- **SNR: CaImAn (large-transient score):** an exceptional-event score after CaImAn's
+  component evaluation; larger values mean stronger large transients.
 
-## Inferred spike metrics
+### Inferred spike metrics
 
-The inferred spike metrics are computed from dF/F windows around inferred spike
-amplitudes above the threshold set when the reviewer was generated. They are
-computed by `_oasis_event_waveform_metrics` in the generator. The laboratory's
-pipeline produces Suite2p/OASIS amplitudes, but these metrics only need an
-ROI-by-frame inferred-spike array in the documented format, whatever method
-produced it. Changing the amplitude threshold in the viewer updates the
-selected ROI's display and diagnostics, not these metrics.
+Computed by the generator from dF/F windows around frames whose inferred-spike value is
+above the ROI's default threshold, so they need only an ROI-by-frame spike array, from any
+method.
 
-## Assigning labels to metric ranges
+- **Inferred spike SNR:** (peak of the averaged transient − mean of its pre-event
+  baseline) ÷ SD of that baseline, from windows 0.5 s before to 2 s after each event, with
+  at least 3 complete windows. Because the baseline SD is of the averaged waveform, it
+  grows with the number of events.
+- **Rise tau:** time between the 10% and 90% crossings of the average event.
+- **Decay tau:** time from the average event's peak to 1/e of its amplitude.
 
-**Assign Labels to Metric Ranges**, in the **Bulk labeling menu** under the
-label buttons, labels every ROI whose value of one metric
-falls in a range you set. For example, you could label ROIs good for a model
-probability of 0.85 or more, bad for 0.15 or less and unsure in between.
-**Use model score thresholds** fills in exactly these, from the thresholds
-stored with the scores.
+### Cell identity labels
 
-Each range works as follows:
+Cell type or compartment labels (for example PV/SST or soma/axon). Check one or more to
+keep only ROIs with those labels; with none checked the filter is not used. They come
+from the session's files or from a `cell_identity_code` column; see
+[Uploaded metrics and categorical labels](inputs.md#uploaded-metrics-and-categorical-labels).
+Other categorical variables have the same kind of filter under Uploaded ROI Metrics.
 
-- It needs a minimum, a maximum or both. A blank side is open, so a range with
-  only a minimum covers every value at or above it.
-- Both bounds are inclusive.
-- Ranges are checked from the top, and an ROI takes the first one it falls in.
-- ROIs outside every range, or with no value for the metric, are left
-  unchanged.
+### ROI model probability
 
-There are two ways to apply the ranges:
+- A classifier's per-ROI probability that the ROI is good, from `roi_model_scores.h5`
+  ([format](inputs.md#roi-model-scores)). Its filter has a minimum only.
+- The scores do not label ROIs unless the reviewer was built with label initialization,
+  in which case ROIs open Good at or above the good threshold, Bad at or below the bad
+  threshold, and Unsure in between.
+- To label ROIs from score ranges in the open reviewer, use
+  [the Bulk labeling menu](#assigning-labels-to-metric-ranges).
 
-- **Review labels** sets Good, Bad, Unsure or Not labeled directly, as the
-  G/B/U/N keys do.
-- **New variable** adds an uploaded ROI metric with the name you give. Its
-  value is the number of the matching range (1 for the first, 2 for the second,
-  and so on, blank outside every range), and each range's name is kept for the
-  exported spreadsheet. The new metric can then be filtered, sorted and
-  exported like any other.
+### Uploaded ROI metrics
 
-Neither option depends on the threshold filters or needs **Apply Filters**.
+Your own numeric metrics and categorical variables, from a build-time file or an upload
+([format](inputs.md#uploaded-metrics-and-categorical-labels)), plus variables made in the
+Bulk labeling menu. A numeric metric's **Section** menu moves it to any section of the
+Filter menu and the matching group of the Sort menu.
 
-## Saving and importing filter sets
+### Saving and importing filter sets
 
-- **Save new filter set:** saves the current thresholds under the name you
-  enter, inside the open reviewer. It appears in the **Filter set name** list
-  until the page is closed.
-- **Save filter set into HTML:** saves the filter set the same way, then
-  downloads a copy of the HTML with it, the current labels and the current sort
-  order embedded. Reopening that copy keeps them.
-- **Import filter set JSON:** loads a file exported with **Export current
-  filter/sorting settings JSON**, including its sort order, or one written by
-  hand. The rules for the file are:
-    - Only `filter` is required.
-    - Leave out any threshold you do not want to use, and use `null` for an
-      unused minimum or maximum.
-    - `cellTypeFilter` lists the cell identity codes to keep.
-    - Custom metrics are keyed by their column name in lower case, with spaces
-      and punctuation replaced by underscores.
-    - Sort metrics for uploaded metrics are written `custom:` plus that name.
+- **Save new filter set** keeps the current thresholds under a name in the open page.
+- **Save filter set into HTML** also downloads a copy of the HTML with it, the current
+  labels and the sort order embedded.
+- **Import filter set JSON** loads a file exported with **Export current filter/sorting
+  settings JSON** (under View and Export), or one written by hand; the same file can be
+  given at build time with `--filter-settings`.
 
-The same file can be given at generation with `--filter-settings`.
+Only `filter` is required. Leave out thresholds you do not use, or write `null` for an
+unused min or max. `cellTypeFilter` lists the cell identity codes to keep. Uploaded
+metrics are keyed by their column name in lower case, with spaces and punctuation
+replaced by underscores; a categorical one takes `{"codes": [...]}`. Sort metrics for
+uploaded metrics are written `custom:` plus that name.
 
 ```json
 {
@@ -343,58 +295,35 @@ The same file can be given at generation with `--filter-settings`.
     "aspectMax": 1.5,
     "roiAreaMin": 40,
     "cellTypeFilter": ["1"],
-    "customMetrics": {"local_contrast": {"min": 0.3, "max": null}}
+    "customMetrics": {"snr": {"min": 2.0}, "layer": {"codes": ["2"]}}
   },
-  "sort": {"metrics": ["custom:local_contrast"], "direction": "desc"}
+  "sort": {"metrics": ["custom:snr"], "direction": "desc"}
 }
 ```
 
-## Sort metrics
+## Sorting ROIs {#sorting-rois}
 
-The Sort menu offers the same metrics as the Filter menu, with the same
-definitions:
+**Sort filtered ROIs** orders the ROIs shown in the field of view, the stacked traces and
+the arrow-key order. The current order is named beside **Sorting**.
 
-- [Morphology metrics](#morphology-metrics);
-- [Cell identity labels](#cell-identity-labels);
-- [Fluorescence trace metrics](#fluorescence-trace-metrics);
-- [Inferred spike metrics](#inferred-spike-metrics);
-- the [ROI model probability](#roi-model-probability), when the session has
-  scores.
+### Sort metrics
 
-Each checked metric is converted to a 0–1 normalized value, and the values are
-summed with equal weight. Cell identity code sorts by the integer code.
-
-## Saving labels and exports
-
-- **Save current state into HTML:** downloads a reviewed copy of the HTML. It
-  keeps the current labels, uploaded metrics, saved filter sets and sort order
-  inside the file.
-- **Export metric spreadsheet CSV:** saves one row per ROI. Each row has
-  code-friendly column names, the current labels, the ROI metrics, filter
-  failures and exclusion reasons. Its first column, `roi_index`, is the ROI's
-  original index.
-- **Export labels NPY:** saves `roi_manual_labels.npy`, a one-dimensional NumPy
-  label array with one entry per ROI, in original-index order. The values are
-  `NaN` not labeled, `0` bad, `1` good and `2` unsure.
-- **Export current filter/sorting settings JSON:** saves the current
-  thresholds, with the filter set name and the current sort order, for reuse
-  or documentation.
-
-How to load each export downstream is described in
-[Export and downstream use](export.md#what-each-export-contains).
+The Sort menu offers the same metrics as the Filter menu, with the same definitions. Each
+checked metric is converted to a 0 to 1 normalized value and the values are summed with
+equal weight, so a reviewer can walk the session worst-first by any combination.
+Categorical variables sort by their integer code.
 
 ## Uploading files
 
-**Upload Custom ROI Metrics/Cell Identity Labels** accepts two kinds of file:
+**Upload Custom ROI Metrics/Cell Identity Labels** loads one `.csv`, `.tsv` or `.txt`
+file holding any mix of numeric metrics, categorical variables and cell identity labels;
+the dialog lists the columns it requires, says what it loaded, and asks you to name any
+codes that came without a `_label` column. The format is given once, in
+[Uploaded metrics and categorical labels](inputs.md#uploaded-metrics-and-categorical-labels).
 
-- **QC metric:** your own per-ROI values to filter and sort by. The file has
-  one row per ROI, one column per metric, and a header row whose names become
-  the metric names. Values must be numbers, with blanks or `NaN` where missing.
-- **Cell identity label:** one row per ROI with an integer
-  `cell_identity_code`, a `cell_identity_label` name, or both. Names can be
-  edited in the dialog after loading.
+## Saving labels and exports
 
-Both kinds accept CSV, TSV, TXT and JSON. `roi_index` is optional. Without it,
-row *k* is ROI *k*, and the viewer reports an error if the number of rows does
-not match the number of ROIs. Examples of every form are in
-[Upload file formats](cli-mapping.md#upload-file-formats).
+**View ROI metric spreadsheet** shows every ROI's labels and metrics in a new window, and
+**Save Labels** saves the reviewer or exports the spreadsheet, labels or filter settings.
+Each export, its columns and how to load it downstream are described in
+[Export and downstream use](export.md).

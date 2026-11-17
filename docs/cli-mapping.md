@@ -1,147 +1,127 @@
-# Command line, configuration and interface
+# Build settings: configuration file and command line
 
 A setting reaches the reviewer by one of three routes:
 
-1. **A configuration field.** `scripts/build_reviewer.py` translates each field
-   into exactly one generator flag.
-2. **A generator flag.** Pass it directly to `python -m roi_reviewer.summary`,
-   or let the configuration supply it.
-3. **A control in the open reviewer.** These act on the page in the browser, and
-   several have a build-time counterpart.
+1. **A configuration field.** `scripts/build_reviewer.py` translates each field into
+   exactly one generator flag.
+2. **A generator flag.** Pass it directly to `python -m roi_reviewer.summary`, or let
+   the configuration supply it.
+3. **A control in the open reviewer.** These act on the page in the browser; several
+   have a build-time counterpart, listed [below](#controls-with-a-build-time-counterpart).
 
-The first two routes are equivalent. A configuration file and the matching
-command produce byte-identical reviewer HTML. The tables below show, for every
-setting, its name on each route and where it appears in the interface.
+The first two routes are equivalent: a configuration file and the matching command
+produce byte-identical reviewer HTML. One session, one configuration file: copy
+`config/template.yaml`, which documents every field in comments, edit the paths, and
+build.
 
-## Build settings
-
-| Configuration field | Generator flag | Where it shows in the reviewer |
-|:--|:--|:--|
-| `session_path` | positional argument | Everything: images, masks, traces and metrics are read from here |
-| `output_dir` | `--output-dir` | Where the HTML, PDF and sidecar arrays are written |
-| `input_layout` | `--input-layout` | Which files supply masks and traces; `auto` omits the flag |
-| `roi_index_label` | `--roi-index-label` | The selected-ROI header ("Original Index 48, sort position 49 of 225"), the labeler's "Selected ROI (Original Index)" field, and the first sort key |
-| `target_structure` | `--target-structure` | The **Target structure** menu at the top of **ROI Metric Filters**: the preset it opens on |
-| `initialize_labels_from_model_scores` | `--initialize-labels-from-roi-model-scores` | The labeler's starting counts (otherwise every ROI opens as not labeled) |
-| `custom_roi_metrics` | `--custom-roi-metrics` (once per file) | **Uploaded / Custom ROI Metrics** in the filter menu, the sort menu, and the metric spreadsheet |
-| `html_name` | `--html-name` | Filename of the reviewer HTML |
-| `pdf_name` | `--pdf-name` | Filename of the static summary PDF |
-| `archive_output` | `--archive-output` | Outputs go into a per-session subfolder, which is also zipped |
-| `archive_name` | `--archive-name` | Name of that zip |
-| `name`, `notes` | none | Recorded in `run.json` only |
-
-`target_structure` accepts `all_rois`, `soma`, `dendrite` or `dendrite_relaxed`.
-When it is omitted, the menu opens on whatever the session's own pipeline
-parameters recorded. `all_rois` applies no thresholds.
-
-The build script's own options, `--dry-run` and `--skip-validation`, have no
-generator equivalent. `--dry-run` prints the generator command a configuration
-resolves to without running it, which makes it the quickest way to translate a
-configuration into a command.
+```yaml
+name: my_session
+session_path: /path/to/processed/session
+input_layout: auto
+output_dir: outputs/my_session
+roi_index_label: "Original Index"
+filter_set: null
+initialize_labels_from_model_scores: false
+custom_roi_metrics: []
+force_embed: null
+embed_limit_mb: 80
+notes: ""
+```
 
 !!! warning "Unrecognized configuration fields are an error"
-    A misspelled field (`custom_metrics:` for `custom_roi_metrics:`) stops the
-    build and lists the known fields, rather than being dropped and producing a
-    reviewer without the setting.
+    A misspelled field (`custom_metrics:` for `custom_roi_metrics:`) stops the build and
+    lists the known fields, rather than being dropped and producing a reviewer without the
+    setting.
 
-## Session files read automatically
+## Every setting
 
-Some inputs take no flag at all: the generator looks for them in the session
-directory and, if present, enables the matching part of the interface.
-
-| File in the session | Where it shows in the reviewer |
-|:--|:--|
-| `dff.h5` (dataset `dff`) | The selected-ROI trace and the stacked traces. Large sessions are written out as a `<session>_dff.npy` sidecar |
-| `spikes.h5` (dataset `spikes`) | The inferred-spike overlay, the spike diagnostics panel and every inferred-spike metric. Large sessions are written out as `<session>_oasis_spikes.npy` |
-| `roi_cell_type_labels.npy` | **Categorical ROI Variables** in the filter menu, and the categorical sort key |
-| `roi_model_scores.h5` or `roi_qc_predictions.h5` | **Model Derived Metrics** in the filter and sort menus; also the labeler's starting state when `initialize_labels_from_model_scores` is set |
-| `masks.h5` (`mean_anat`, `masks_anat`) | The **Anatomical mean** panel, and the **Cellpose ROIs** option in its **Overlay** menu, which is offered only when the anatomical image is present |
-
-## Controls in the open reviewer
-
-| Reviewer control | What it loads | Build-time equivalent |
+| Configuration field | Generator flag | Effect |
 |:--|:--|:--|
-| **Upload Custom ROI Metrics/Cell Identity Labels** → *QC metric* | CSV, TSV, TXT or JSON, one value per ROI per column | `custom_roi_metrics` / `--custom-roi-metrics`, which also accepts NPY and NPZ |
-| **Upload Custom ROI Metrics/Cell Identity Labels** → *Cell identity label* | A table with `cell_identity_code` and/or `cell_identity_label` | `roi_cell_type_labels.npy` in the session; no flag |
-| **Load dF/F file** | A `.npy` dF/F array | The `<session>_dff.npy` sidecar the generator writes |
-| **Load inferred spikes file** | A `.npy` inferred-spike array | The `<session>_oasis_spikes.npy` sidecar the generator writes |
-| **Filter set name** menu | A built-in or saved filter set | `filter_set` / `--filter-set` sets which built-in filter set it starts from |
-| **Import filter set JSON** | A filter set and sort order exported from a reviewer, or written by hand | `filter_settings` / `--filter-settings` |
+| `session_path` | positional argument | The directory read: a session root containing `suite2p/plane0/`, the plane directory itself, or a directory in the [documented layout](inputs.md#the-documented-layout) |
+| `output_dir` | `--output-dir` | Where the HTML, PDF and sidecar arrays are written |
+| `input_layout` | `--input-layout` | Which files supply masks and traces; see [Choosing an input layout](#choosing-an-input-layout) |
+| `roi_index_label` | `--roi-index-label` | Wording of the ROI index in the selected-ROI header, the labeler and the first sort key; presentation only |
+| `filter_set` | `--filter-set` | The filter set the **Filter set name** menu opens on: `all_rois`, `soma`, `dendrite` or `dendrite_relaxed`; see [Filter sets and masks from other software](#filter-sets-and-masks-from-other-software) |
+| `filter_settings` | `--filter-settings` | A [filter set JSON](interface-reference.md#saving-and-importing-filter-sets) whose thresholds and sort order the reviewer opens with |
+| `initialize_labels_from_model_scores` | `--initialize-labels-from-roi-model-scores` | Open with ROIs labeled from the [model scores](inputs.md#roi-model-scores) file instead of unlabeled |
+| `custom_roi_metrics` | `--custom-roi-metrics` (once per file) | Embed [your own metrics and categorical labels](inputs.md#uploaded-metrics-and-categorical-labels) |
+| `custom_roi_metric_sections` | `--custom-roi-metric-section NAME=SECTION` | Place an uploaded metric under another section of the Filter and Sort menus |
+| `force_embed` | `--force-embed true` / `false` | `true` always embeds dF/F and inferred spikes in the HTML; `false` always writes them as sidecar `.npy` files; omitted (`null`) decides by size |
+| `embed_limit_mb` | `--embed-limit-mb` | Size limit for automatic embedding, in MB of encoded data per array (default 80; must exceed 2) |
+| `title` | `--title` | Page title and heading; defaults to the session name |
+| `html_only` | `--html-only` | Rewrite only the page of an existing reviewer from its embedded data, in seconds; see [Rebuilding only the page](#rebuilding-only-the-page) |
+| `html_name`, `pdf_name` | `--html-name`, `--pdf-name` | Output filenames |
+| `archive_output`, `archive_name` | `--archive-output`, `--archive-name` | Write outputs into a per-session subfolder and zip it |
+| `name`, `notes` | none | Recorded in `run.json` only |
 
-### Upload file formats
+`--force-embed` also accepts `1`/`0` and `yes`/`no`, in any capitalization. The older
+field name `target_structure` is still accepted for `filter_set`.
 
-`roi_index` is the ROI's 0-based original index, the number the reviewer shows for the selected ROI. It is optional: without it, row *k* is ROI *k* and the file needs exactly one row per ROI. No other name is accepted for this column; a file with a `suite2p_index`, `roi` or `index` column is rejected with a message asking for `roi_index`.
+The build script's own options have no generator equivalent. `--dry-run` resolves every
+path, reports the layout that would be used and prints the generator command, writing
+nothing. `--skip-validation` skips the input check that runs before an `external_rois`
+build.
 
-**QC metric** (CSV, TSV or TXT): one row per ROI, one column per metric, numeric values.
+## Choosing an input layout
 
-```csv
-roi_index,local_contrast,tdtomato_intensity
-0,0.82,1530
-1,0.41,212
-2,0.67,880
-```
+`auto` infers the layout and prints what it chose, which is right for most sessions.
+Name it explicitly (`suite2p` or `external_rois`) when a directory contains more than one
+candidate.
 
-The same as JSON, one array per metric in original-index order (a list of row objects
-with a `roi_index` key also works):
+!!! warning "Deprecated pre-filtered layouts"
+    `qc_results` and `manual_qc_results` describe pre-filtered ROI sets. Select them
+    explicitly rather than relying on `auto`: a session containing both a full and a
+    pre-filtered set resolves to the pre-filtered one, and the reviewer then shows fewer
+    ROIs than the segmentation produced with nothing to indicate it.
 
-```json
-{
-  "local_contrast": [0.82, 0.41, 0.67],
-  "tdtomato_intensity": [1530, 212, 880]
-}
-```
+## Filter sets and masks from other software
 
-**Cell identity label:**
+The built-in filter sets' morphology windows were calibrated on Suite2p's own values. For
+masks from other software the generator computes the same shape statistics the Suite2p
+way ([definitions](interface-reference.md#morphology-metrics)), but binary masks carry no
+pixel weights and no mask format carries Suite2p's detection center, so compactness in
+particular can differ. `filter_set: all_rois` applies no thresholds and is the safest
+start; set thresholds from the [distribution plots](interface-reference.md#metric-distributions)
+instead.
 
-```csv
-roi_index,cell_identity_code,cell_identity_label
-0,1,inhibitory
-1,-1,excitatory
-2,1,inhibitory
-```
+## Embedded or separate trace arrays
 
-**Filter set JSON** (Import filter set JSON, or `--filter-settings`). Only `filter` is
-required; leave out thresholds you do not use, and write `null` for an unused minimum
-or maximum. Uploaded metrics are keyed by their column name in lower case, and are
-sorted with `custom:` plus that name.
+By default dF/F and inferred spikes are embedded in the HTML when ROIs × frames is at
+most 15,335,424 (about 80 MB of encoded data per array), and otherwise written beside it
+as `SESSION_dff.npy` and `SESSION_inferred_spikes.npy`. Separate files load automatically
+only when the page is opened through a web server; see
+[Open the result](quickstart.md#open-the-result). `--embed-limit-mb 200` raises the
+cutoff to 38,928,384; `--force-embed true` embeds regardless, with a warning above 512 MB
+per array, which browsers may not open.
 
-```json
-{
-  "name": "strict soma",
-  "filter": {
-    "skewMin": 0.5,
-    "aspectMax": 1.5,
-    "roiAreaMin": 40,
-    "cellTypeFilter": ["1"],
-    "customMetrics": {"local_contrast": {"min": 0.3, "max": null}}
-  },
-  "sort": {"metrics": ["custom:local_contrast"], "direction": "desc"}
-}
-```
+## Rebuilding only the page
 
-**Load dF/F file** and **Load inferred spikes file:** NumPy arrays, C-ordered,
-little-endian float32 (float64 is converted on load), named after the session so
-they load automatically when the page is served:
+`--html-only` reads the data payload out of an existing reviewer in `--output-dir` and
+writes it into the current page template, without recomputing metrics. Use it after
+updating the generator. Combined with `--force-embed` it converts a reviewer between
+embedded and separate arrays from its own data; embedding leaves the `.npy` files in
+place.
 
-```python
-import numpy as np
+## Controls with a build-time counterpart
 
-# one row per ROI in original-index order, one column per frame; both arrays the same shape
-np.save("SESSION_dff.npy", np.ascontiguousarray(dff, dtype=np.float32))
-np.save("SESSION_oasis_spikes.npy", np.ascontiguousarray(spikes, dtype=np.float32))
-```
+| Reviewer control | Build-time equivalent |
+|:--|:--|
+| **Upload Custom ROI Metrics/Cell Identity Labels** | `custom_roi_metrics` / `--custom-roi-metrics`, same [file format](inputs.md#uploaded-metrics-and-categorical-labels) |
+| **Load dF/F**, **Load inferred spikes** | The `SESSION_dff.npy` and `SESSION_inferred_spikes.npy` files the generator writes |
+| **Filter set name** menu | `filter_set` / `--filter-set` |
+| **Import filter set JSON** | `filter_settings` / `--filter-settings` |
 
-**Embedding a metric at build time and uploading it in the browser are not the
-same in what persists.** A build-time metric is part of the file for everyone who
-opens it. A browser upload exists in that open page until you use **Save
-current state into HTML**, which writes it, together with labels and thresholds,
-into the downloaded copy. The two trace arrays are the exception: arrays loaded
-with **Load dF/F file** or **Load inferred spikes file** are not saved into the
-HTML, so a saved copy still needs its sidecars beside it.
+Inputs that need no setting at all, such as `spikes.h5`, mean images, motion offsets,
+cell type labels and model scores, are found in the session directory automatically;
+[Preparing your inputs](inputs.md) lists them.
+
+**A build-time metric and a browser upload differ in what persists.** A build-time metric
+is part of the file for everyone who opens it. A browser upload exists in the open page
+until you use **Save current state into HTML**. Arrays loaded with **Load dF/F** or
+**Load inferred spikes** are never saved into the HTML, so a saved copy still needs them
+beside it.
 
 ## The same build, both ways
-
-A configuration file:
 
 ```yaml
 name: example_session
@@ -149,11 +129,10 @@ session_path: data/example_session
 input_layout: external_rois
 output_dir: outputs/example_session
 roi_index_label: "Original Index"
-target_structure: all_rois
+filter_set: all_rois
 custom_roi_metrics:
-  - data/example_session/burst_rate.csv
-html_name: reviewer.html
-archive_output: true
+  - data/example_session/qc_metrics.csv
+force_embed: true
 ```
 
 ```bash
@@ -167,17 +146,11 @@ python -m roi_reviewer.summary data/example_session \
     --output-dir outputs/example_session \
     --input-layout external_rois \
     --roi-index-label "Original Index" \
-    --target-structure all_rois \
-    --custom-roi-metrics data/example_session/burst_rate.csv \
-    --html-name reviewer.html \
-    --archive-output
+    --filter-set all_rois \
+    --custom-roi-metrics data/example_session/qc_metrics.csv \
+    --force-embed true
 ```
 
-The configuration route also validates `external_rois` inputs before building,
-resolves relative paths against the repository root, and writes `run.json`
-recording the exact command it ran. The direct command does none of these.
-To see the command for any configuration:
-
-```bash
-python scripts/build_reviewer.py config/example_session.yaml --dry-run
-```
+The configuration route also validates `external_rois` inputs before building, resolves
+relative paths against the repository root, and writes `run.json` recording the exact
+command. `--dry-run` prints that command for any configuration.

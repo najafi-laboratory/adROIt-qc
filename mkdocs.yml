@@ -11,6 +11,7 @@ markdown_extensions:
   # md_in_html is required: every screenshot sits inside <div class="screenshot" markdown>
   # for styling, and without this extension the image syntax inside is left unrendered.
   - md_in_html
+  - attr_list
   - admonition
   - toc:
       permalink: true
@@ -23,8 +24,7 @@ nav:
   - Getting Started:
       - Quickstart: quickstart.md
       - Preparing Your Inputs: inputs.md
-      - Build Configuration: configuration.md
-      - CLI, Config and Interface: cli-mapping.md
+      - Build Settings: cli-mapping.md
   - The Reviewer:
       - Interface Tour: interface.md
       - Interface Reference: interface-reference.md

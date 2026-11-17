@@ -1,70 +1,60 @@
 # Interface tour
 
-Everything below is one HTML file. The screenshots come from the demo posterior
-parietal cortex session, 225 ROIs over 107,135 frames with an anatomical second
-channel and excitatory/inhibitory labels.
+Everything below is one HTML file. The screenshots come from the demo posterior parietal
+cortex session: 225 ROIs over 107,135 frames, with an anatomical second channel,
+excitatory/inhibitory labels and classifier scores. Each panel's **(i)** icon opens a
+short summary; the [Interface Reference](interface-reference.md) has the full text.
 
-## Field of view
+<div class="screenshot screenshot-tall" markdown>
+![The whole reviewer: field of view, summary by QC label, selected-ROI trace, stacked traces, and the menu on the right.](img/full-layout.png)
+</div>
+
+## Field of view and summary
 
 <div class="screenshot" markdown>
 ![Functional and anatomical mean images with clickable ROI outlines; the selected ROI is highlighted.](img/fov-selection.png)
 </div>
 
-Outlines on the functional mean image are clickable and correspond to the segmented
-masks. Scroll and drag zoom and pan, which matters for dense fields. Where anatomical
-imaging is available an anatomical mean panel sits beside it, with an overlay selector
-for which ROI set to draw. Selecting an outline updates every linked panel.
+Outlines on each channel's mean image are clickable, and selecting one updates every
+linked panel. Beside them, the [summary by QC label](interface-reference.md#summary-of-good-bad-and-unsure-rois)
+shows how many ROIs carry each label, their firing rates and their average transients,
+and redraws as you label.
+
+<div class="screenshot" markdown>
+![The summary by QC label: ROIs by label, firing rate by label and average transients.](img/label-summary.png)
+</div>
 
 ## Selected ROI trace
 
 <div class="screenshot" markdown>
-![The selected ROI's dF/F trace with the inferred-spike overlay and amplitude-threshold control.](img/selected-trace.png)
+![The selected ROI's dF/F trace with the inferred-spike overlay and the Spike threshold button.](img/selected-trace.png)
 </div>
 
-The dF/F trace for the selected ROI, with inferred spikes drawn over it. The amplitude
-threshold is adjustable per ROI, and `Reset to ROI default` returns it to the value the
-generator computed. The two load buttons are the manual path for the sidecar arrays, needed when the page
-is opened from disk (`file://`), where browsers block the automatic load
-([why](quickstart.md#whether-the-sidecars-load-automatically)).
-Wheel or drag to zoom and pan in time; the window applies to the motion panel as well.
-
-## Inferred-spike diagnostics
+The selected ROI's dF/F, with inferred spikes above the
+[spike threshold](interface-reference.md#inferred-spike-threshold) drawn as red dots. The
+threshold menu sets raw or per-ROI SD units and a default for all ROIs. Its average
+transient, under **Selected ROI** in the summary column, is the check to make when a spike
+count looks implausible: an average that does not resemble a calcium event means the
+inference has latched onto something else.
 
 <div class="screenshot" markdown>
-![Event-triggered average transient for the selected ROI against an exponential decay model.](img/spike-diagnostics.png)
+![Average calcium transient of the selected ROI with its exponential decay fit.](img/spike-diagnostics.png)
 </div>
-
-Opened from the trace panel. The event-triggered average transient at the current
-amplitude threshold is shown against an exponential decay model, with the count of
-events and the empirical decay time constant in the header. This is the panel to check
-when a spike count looks implausible: a trace whose average transient does not resemble
-a calcium event is one where the inference has latched onto something else.
 
 ## Metric filters
 
 <div class="screenshot" markdown>
-![The metric filter menu with morphology, categorical, model-derived, trace and inferred-spike groups.](img/qc-filters.png)
+![The Filter ROIs menu with morphology, cell identity, model-derived, trace and inferred-spike groups.](img/qc-filters.png)
 </div>
 
-No thresholds are active by default and every ROI passes. Editing a field immediately
-updates the pass/fail count and the distribution previews. The field of view, the
-set of ROIs that arrow keys step through, and the labels change when
-`Apply Filters` is clicked, which marks passing ROIs not labeled and failing ROIs Bad.
-After manual labeling, refresh the view with a sort rather than pressing
-`Apply Filters` again, which would reset every label. Filters compose conjunctively, and the metric spreadsheet
-export records which thresholds each ROI failed.
-
-Beside each numeric field the menu reports a reference statistic computed from the ROIs
-in this file. These describe the current population so a candidate cut can be seen in
-context. They are not recommendations.
+No thresholds are active by default. Each metric's distribution sits above its Min and
+Max fields, with the mean and quartiles marked; drag a quartile line to set a threshold
+and double-click it to remove it. **Apply Filters** labels failing ROIs Bad
+([details](interface-reference.md#filtering-rois)).
 
 <div class="screenshot" markdown>
-![A per-metric distribution histogram with its starting value drawn as a dashed line.](img/metric-distributions.png)
+![A metric's distribution with its mean, quartile and threshold lines.](img/metric-distributions.png)
 </div>
-
-`Show distribution` draws the metric's distribution across the session with markers that
-track the threshold fields, so a cut can be placed against the actual population rather
-than guessed from a number.
 
 ## Sorting
 
@@ -72,10 +62,8 @@ than guessed from a number.
 ![The sort dialog listing every metric available as a sort key.](img/sort-rois.png)
 </div>
 
-Any metric can be a sort key. Checking several converts each to a 0-1 normalized value
-and sums them with equal weight. The sort order drives arrow-key stepping, so a
-reviewer can walk the ROI set worst-first by whatever definition of worst the session
-calls for.
+Any metric, or a sum of several normalized metrics, can be the sort key. The sort order
+drives arrow-key stepping, so a session can be walked worst-first.
 
 ## Labeling
 
@@ -83,58 +71,40 @@ calls for.
 ![The labeler: counts by label, the selected-ROI index, the four label buttons and navigation.](img/manual-labels.png)
 </div>
 
-Good, bad, unsure and not labeled, by button or by single keystroke, with left and
-right arrows stepping through the visible ROIs in the current sort order. The header
-keeps a running count of each label. The selected ROI is identified by its original
-index, which is 0-based like every file the generator reads and writes (ROI *k* is row
-*k* of `F.npy`, the trace files and the exported labels), and its position in the
-current sort order is counted from 1, out of the ROIs currently shown.
-
-### Visibility by label
+Good, bad, unsure and not labeled, by button or keystroke, with the arrows stepping
+through the visible ROIs. **Show ROIs** restricts visibility by label, for example to a
+second pass over the unsure ROIs.
 
 <div class="screenshot" markdown>
-![The Show ROIs menu, with Good, Bad, Unsure and Not labeled each toggleable.](img/show-rois.png)
+![The Bulk labeling menu with a metric's distribution and two labeled ranges.](img/range-labels.png)
 </div>
 
-Visibility can be restricted by label, which is how a second pass over just the unsure
-ROIs is done. Visibility is applied after the metric filters, so the two compose.
+The **Bulk labeling menu** labels every visible ROI at once, or
+[labels ROIs from ranges of one metric](interface-reference.md#assigning-labels-to-metric-ranges),
+for example a classifier probability, so a rule plus a bulk label is a recorded decision
+rather than a long click sequence.
 
-### Bulk labeling
+## Export
 
 <div class="screenshot" markdown>
-![The Bulk labeling menu.](img/bulk-labeling.png)
+![The Save Labels dialog.](img/export-save.png)
 </div>
 
-The **Bulk labeling menu** has two parts. **Label all visible ROIs as ...** applies one label, including Not labeled, to every currently visible ROI; **Assign Labels to Metric Ranges** labels ROIs from ranges of one metric (see [Assigning labels to metric ranges](interface-reference.md#assigning-labels-to-metric-ranges)). A filter plus a bulk
-label is therefore a recorded, reproducible decision rather than a long click sequence.
+The reviewed state is saved into a new self-contained HTML, and labels, metrics and
+filter settings export for analysis ([details](export.md)).
 
-### Export
-
-<div class="screenshot" markdown>
-![The Save Labels dialog: save state into HTML, metric spreadsheet CSV, labels NPY, thresholds JSON.](img/export-save.png)
-</div>
-
-The export menu writes the reviewed state back into a new self-contained HTML, a
-per-ROI metric table as CSV including which thresholds each ROI failed, the labels as a
-one-dimensional array indexed by original ROI index, and the active thresholds as JSON
-for reuse on another session.
-
-## Stacked traces
+## Stacked traces and motion correction
 
 <div class="screenshot" markdown>
 ![A stacked panel of consecutive dF/F traces in the current sort order.](img/stacked-traces.png)
 </div>
 
-A block of consecutive ROIs in the current sort order, which is how duplicated
-detections of one cell are spotted: two rows carrying the same events are two ROIs
-sharing a source.
-
-## Motion correction
+Consecutive ROIs in the current sort order: two rows carrying the same events are two
+ROIs sharing a source.
 
 <div class="screenshot" markdown>
-![Per-frame x and y drift with shift distributions and cumulative distribution functions.](img/motion-correction.png)
+![Per-frame x and y shift with shift distributions.](img/motion-correction.png)
 </div>
 
-Per-frame rigid drift, following the same time window as the trace panels, with shift
-distributions and cumulative distributions below. A session whose traces look odd at a
-particular time is often a session that moved then.
+Per-frame rigid shift in the same time window as the traces, with the session's shift
+distributions ([input format](inputs.md#motion-offsets)).

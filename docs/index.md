@@ -40,23 +40,23 @@ documented input layout  ---->  scripts/validate_inputs.py   (check before build
 outputs/my_session/
     <name>_interactive_fov_roi_dff.html      the reviewer
     <name>_processing_summary.pdf            static summary
-    <name>_dff.npy, <name>_oasis_spikes.npy  sidecar arrays for large sessions
+    <name>_dff.npy, <name>_inferred_spikes.npy  sidecar arrays for large sessions
     run.json                                 resolved paths and options
 ```
 
 For sessions above the embedding threshold the trace arrays are written beside the
 HTML as sidecars rather than embedded in it. The HTML and its sidecars must travel
 together. They load automatically when the page is opened through a web address, and
-are selected with the two load buttons when it is opened from disk; see
+are selected with **Load dF/F** and **Load inferred spikes** when it is opened from disk; see
 [Whether the sidecars load automatically](quickstart.md#whether-the-sidecars-load-automatically).
 
 ## Where to start
 
 * [Demo Sessions](demo-sessions.md#try-them-without-installing-anything) links two
   example reviewers you can download and open in a browser right away.
-
 * [Quickstart](quickstart.md) installs the package and builds a reviewer.
 * [Preparing Your Inputs](inputs.md) is the input contract, including the one
   correspondence no tool can check for you.
-* [Build Configuration](configuration.md) documents every configuration field.
-* [Interface Tour](interface.md) walks through the reviewer's panels.
+* [Build Settings](cli-mapping.md) documents every configuration field and flag.
+* [Interface Tour](interface.md) walks through the reviewer's panels, and the
+  [Interface Reference](interface-reference.md) holds the full text behind each **(i)**.
