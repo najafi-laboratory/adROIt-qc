@@ -541,7 +541,10 @@ def _load_roi_model_scores(session_dir: Path, n_rois: int) -> tuple[list[dict[st
     if path is None:
         return predictions, "No ROI model score predictions loaded."
     with h5py.File(path, "r") as h5:
-        probability = np.asarray(h5["probability"], dtype=np.float64).reshape(-1)
+        # classifier_score: a 0-1 classifier output, not a calibrated probability.
+        # Score files written before the rename store the same values as "probability".
+        score_key = "classifier_score" if "classifier_score" in h5 else "probability"
+        probability = np.asarray(h5[score_key], dtype=np.float64).reshape(-1)
         states = _decode_h5_strings(np.asarray(h5["state"]))
         if "suite2p_roi" in h5:
             roi_indices = np.asarray(h5["suite2p_roi"], dtype=np.int64).reshape(-1)
@@ -710,8 +713,8 @@ def _all_rois_filter() -> dict[str, float | int | None]:
         "oasisDecayTauMin": None,
         "oasisDecayTauMax": None,
         "cellTypeFilter": None,
-        "roiModelScoreProbabilityMin": None,
-        "roiModelScoreProbabilityMax": None,
+        "classifierScoreMin": None,
+        "classifierScoreMax": None,
     }
 
 
@@ -736,8 +739,8 @@ def _morphology_preset_payload() -> dict[str, dict[str, float | int | None]]:
             "oasisDecayTauMin": None,
             "oasisDecayTauMax": None,
             "cellTypeFilter": None,
-            "roiModelScoreProbabilityMin": None,
-            "roiModelScoreProbabilityMax": None,
+            "classifierScoreMin": None,
+            "classifierScoreMax": None,
         }
     return presets
 
@@ -1995,6 +1998,12 @@ def _assign_custom_metric_sections(custom_metrics: dict[str, Any], assignments: 
             definition["section"] = section
 
 
+# Names used before the classifier output was renamed from "ROI model probability" to
+# "classifier score"; filter settings files that use them still load.
+_LEGACY_FILTER_KEYS = {"roiModelScoreProbabilityMin": "classifierScoreMin", "roiModelScoreProbabilityMax": "classifierScoreMax"}
+_LEGACY_SORT_METRICS = {"roi_model_score_probability": "classifier_score"}
+
+
 def _load_filter_settings(path: str | os.PathLike[str]) -> dict[str, Any]:
     """Load filter/sorting settings exported from the reviewer (JSON) or written by hand (JSON or YAML)."""
 
@@ -2018,6 +2027,7 @@ def _load_filter_settings(path: str | os.PathLike[str]) -> dict[str, Any]:
         filter_values = {key: value for key, value in raw.items() if key not in meta}
     if not isinstance(filter_values, dict):
         raise ValueError(f"{settings_path}: 'filter' must be a mapping of threshold names to values.")
+    filter_values = {_LEGACY_FILTER_KEYS.get(key, key): value for key, value in filter_values.items()}
     name = str(raw.get("name") or raw.get("preset_name") or raw.get("filter_set") or settings_path.stem).strip()
     sort = raw.get("sort")
     if sort is not None:
@@ -2029,7 +2039,7 @@ def _load_filter_settings(path: str | os.PathLike[str]) -> dict[str, Any]:
         direction = str(sort.get("direction", "asc")).lower()
         if direction not in {"asc", "desc"}:
             raise ValueError(f"{settings_path}: sort direction must be 'asc' or 'desc', got {direction!r}.")
-        sort = {"metrics": [str(metric) for metric in metrics], "direction": direction}
+        sort = {"metrics": [_LEGACY_SORT_METRICS.get(str(metric), str(metric)) for metric in metrics], "direction": direction}
     return {"name": name, "filter": filter_values, "sort": sort, "source": str(settings_path)}
 
 
@@ -2723,15 +2733,16 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
       </div>
       <div id="modelDerivedMetricSources" class="info-box" hidden>
         <ul class="info-list">
-          <li>ROI model probability is a classifier&apos;s per-ROI probability that the ROI is good, read from <code>roi_model_scores.h5</code>.</li>
+          <li>Classifier score is a classifier&apos;s per-ROI output from 0 to 1, read from <code>roi_model_scores.h5</code>; higher means the classifier rates the ROI as more likely good.</li>
+          <li>It ranks ROIs but is not a calibrated probability: a score of 0.8 does not mean that 80% of such ROIs are good.</li>
           <li>The scores do not label ROIs unless the reviewer was generated with label initialization.</li>
           <li>Use the <strong>Bulk labeling menu</strong> to label ROIs from score ranges.</li>
         </ul>
-        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#roi-model-probability" target="_blank" rel="noopener noreferrer">ROI model probability in full</a></p>
+        <p><a class="docs-link" href="https://najafi-laboratory.github.io/roi-reviewer-demo/interface-reference/#classifier-score" target="_blank" rel="noopener noreferrer">Classifier score in full</a></p>
       </div>
       <div class="filter-controls" id="modelScoreFilterControls">
-        <label>ROI model probability min <span class="threshold-default" id="roiModelScoreProbabilityMinDefault"></span><input id="roiModelScoreProbabilityMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
-        <details class="metric-histogram-panel" open><summary>ROI model probability</summary><canvas class="metric-histogram" data-metric="roi_model_score_probability" data-min="roiModelScoreProbabilityMin" aria-label="ROI model probability distribution"></canvas></details>
+        <label>Classifier score min <span class="threshold-default" id="classifierScoreMinDefault"></span><input id="classifierScoreMin" type="number" min="0" max="1" step="0.01" placeholder="Not Used"></label>
+        <details class="metric-histogram-panel" open><summary>Classifier score</summary><canvas class="metric-histogram" data-metric="classifier_score" data-min="classifierScoreMin" aria-label="Classifier score distribution"></canvas></details>
       </div>
       <div class="filter-controls custom-metric-slot" data-section="model_derived"></div>
       </div>
@@ -2890,7 +2901,7 @@ canvas {{ width: 100%; display: block; background: #fff; border: 1px solid #d0d5
         <div id="sortMetricList" class="sort-metric-list">
           <label><input type="checkbox" name="sortMetric" value="original" checked> <span class="roi-index-label">Original Suite2p index</span></label>
           <div class="sort-metric-group" id="modelDerivedSortGroup">Model-Derived Metrics</div>
-          <label id="modelScoreSortOption"><input type="checkbox" name="sortMetric" value="roi_model_score_probability"> ROI model probability</label>
+          <label id="modelScoreSortOption"><input type="checkbox" name="sortMetric" value="classifier_score"> Classifier score</label>
           <div class="custom-sort-slot" data-section="model_derived"></div>
           <div class="sort-metric-group">Morphology Metrics</div>
           <label><input type="checkbox" name="sortMetric" value="aspect"> Aspect ratio</label>
@@ -4424,7 +4435,7 @@ function metricValue(roi, metric) {{
   if (metric === "oasis_rise_tau_seconds") return dffMetric(roi, "oasis_rise_tau_seconds");
   if (metric === "oasis_decay_tau_seconds") return dffMetric(roi, "oasis_decay_tau_seconds");
   if (metric === "cell_type_code") return data.cellTypeLabels?.[roi] ?? NaN;
-  if (metric === "roi_model_score_probability") return data.roiModelScores?.[roi]?.probability ?? NaN;
+  if (metric === "classifier_score") return data.roiModelScores?.[roi]?.probability ?? NaN;
   if (metric === "roi_area") return data.dffMetrics[roi].roi_area;
   if (metric === "connectivity") return data.morphology[roi].connect;
   if (metric === "skew") return data.morphology[roi].skew;
@@ -4445,7 +4456,7 @@ function metricLabel(metric) {{
   if (metric === "oasis_rise_tau_seconds") return "inferred spike rise tau";
   if (metric === "oasis_decay_tau_seconds") return "inferred spike decay tau";
   if (metric === "cell_type_code") return "cell identity code";
-  if (metric === "roi_model_score_probability") return "ROI model probability";
+  if (metric === "classifier_score") return "classifier score";
   if (metric === "roi_area") return "ROI area (px)";
   if (metric === "connectivity") return "Connectivity";
   if (metric === "skew") return "Skew";
@@ -4504,7 +4515,7 @@ function updateMetricDefaults() {{
   const oasisSnr = finiteMetricValues("oasis_event_snr");
   const oasisRiseTau = finiteMetricValues("oasis_rise_tau_seconds");
   const oasisDecayTau = finiteMetricValues("oasis_decay_tau_seconds");
-  const roiModelProbability = finiteMetricValues("roi_model_score_probability");
+  const roiModelProbability = finiteMetricValues("classifier_score");
   // Lines and the values in parentheses use the loaded filter set where it sets a field,
   // and otherwise a starting statistic of this session's distribution.
   const selectedPreset = loadedFilterSet();
@@ -4529,7 +4540,7 @@ function updateMetricDefaults() {{
   startFrom("oasisRiseTauMax", percentile(oasisRiseTau, 0.75), "75th pct");
   startFrom("oasisDecayTauMin", percentile(oasisDecayTau, 0.25), "25th pct");
   startFrom("oasisDecayTauMax", percentile(oasisDecayTau, 0.75), "75th pct");
-  startFrom("roiModelScoreProbabilityMin", mean(roiModelProbability), "mean");
+  startFrom("classifierScoreMin", mean(roiModelProbability), "mean");
   
   for (const definition of customMetricDefinitions()) {{
     const values = finiteMetricValues(`custom:${{definition.key}}`);
@@ -4559,7 +4570,7 @@ function updateMetricDefaults() {{
   document.getElementById("oasisRiseTauMaxDefault").textContent = oasisRiseTau.length ? referenceText("oasisRiseTauMax") : "";
   document.getElementById("oasisDecayTauMinDefault").textContent = oasisDecayTau.length ? referenceText("oasisDecayTauMin") : "";
   document.getElementById("oasisDecayTauMaxDefault").textContent = oasisDecayTau.length ? referenceText("oasisDecayTauMax") : "";
-  document.getElementById("roiModelScoreProbabilityMinDefault").textContent = roiModelProbability.length ? referenceText("roiModelScoreProbabilityMin") : "";
+  document.getElementById("classifierScoreMinDefault").textContent = roiModelProbability.length ? referenceText("classifierScoreMin") : "";
   configureOasisFilterControls();
 }}
 function configureOasisFilterControls() {{
@@ -5078,7 +5089,7 @@ function setSelected(roi) {{
   const roiModelScore = data.roiModelScores?.[selected] || null;
   const roiModelState = roiModelScore?.state === "gray" ? "unsure" : roiModelScore?.state;
   const roiModelText = roiModelScore
-    ? ` | ROI model score ${{roiModelState}} p(good) ${{fmt(roiModelScore.probability)}}`
+    ? ` | classifier score ${{fmt(roiModelScore.probability)}} (${{roiModelState}})`
     : "";
   if (data.oasisAvailable) setOasisThreshold(thresholdScope !== "all" && sdModeActive() ? thresholdFromK(oasisThresholdK, spikeThresholdStats(selected)) : defaultThresholdFor(selected), false);
   document.getElementById("roiInput").value = suite2pRoi;
@@ -5213,8 +5224,8 @@ function readFilter() {{
     oasisRiseTauMin: filterValue("oasisRiseTauMin"), oasisRiseTauMax: filterValue("oasisRiseTauMax"),
     oasisDecayTauMin: filterValue("oasisDecayTauMin"), oasisDecayTauMax: filterValue("oasisDecayTauMax"),
     cellTypeFilter: readCategoryFilter(),
-    roiModelScoreProbabilityMin: filterValue("roiModelScoreProbabilityMin"),
-    roiModelScoreProbabilityMax: filterValue("roiModelScoreProbabilityMax"),
+    classifierScoreMin: filterValue("classifierScoreMin"),
+    classifierScoreMax: filterValue("classifierScoreMax"),
     customMetrics: readCustomMetricFilters(),
   }};
 }}
@@ -5231,6 +5242,10 @@ function readCustomMetricFilters() {{
   return filters;
 }}
 function normalizeFilter(filter) {{
+  filter = Object.assign({{}}, filter || {{}});
+  // Filter sets saved before the rename from ROI model probability to classifier score.
+  if (filter.classifierScoreMin === undefined && filter.roiModelScoreProbabilityMin !== undefined) filter.classifierScoreMin = filter.roiModelScoreProbabilityMin;
+  if (filter.classifierScoreMax === undefined && filter.roiModelScoreProbabilityMax !== undefined) filter.classifierScoreMax = filter.roiModelScoreProbabilityMax;
   const normalized = {{}};
   for (const key of ["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax"]) {{
     if (filter[key] === null || filter[key] === undefined || String(filter[key]).trim() === "") {{
@@ -5240,7 +5255,7 @@ function normalizeFilter(filter) {{
     const value = Number(filter[key]);
     normalized[key] = Number.isFinite(value) ? value : null;
   }}
-  for (const key of ["eventSnrMin","eventSnrMax","andreaPostdocSnrMin","andreaPostdocSnrMax","roiAreaMin","roiAreaMax","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","roiModelScoreProbabilityMin","roiModelScoreProbabilityMax"]) {{
+  for (const key of ["eventSnrMin","eventSnrMax","andreaPostdocSnrMin","andreaPostdocSnrMax","roiAreaMin","roiAreaMax","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","classifierScoreMin","classifierScoreMax"]) {{
     if (filter[key] === null || filter[key] === undefined || String(filter[key]).trim() === "") {{
       normalized[key] = null;
       continue;
@@ -5336,7 +5351,7 @@ function passesFilter(roi, metrics, filter) {{
   const oasisEventSnr = dffMetricValue(dffMetrics, "oasis_event_snr");
   const oasisRiseTau = dffMetricValue(dffMetrics, "oasis_rise_tau_seconds");
   const oasisDecayTau = dffMetricValue(dffMetrics, "oasis_decay_tau_seconds");
-  const roiModelProbability = metricValue(roi, "roi_model_score_probability");
+  const roiModelProbability = metricValue(roi, "classifier_score");
   const cellTypeFilter = Array.isArray(filter.cellTypeFilter) ? filter.cellTypeFilter : [];
   const cellTypeValue = data.cellTypeLabels?.[roi];
   const cellTypePass = !cellTypeFilter.length || cellTypeFilter.some(value =>
@@ -5362,8 +5377,8 @@ function passesFilter(roi, metrics, filter) {{
     passesUpper(oasisRiseTau, filter.oasisRiseTauMax) &&
     passesLower(oasisDecayTau, filter.oasisDecayTauMin) &&
     passesUpper(oasisDecayTau, filter.oasisDecayTauMax) &&
-    passesLower(roiModelProbability, filter.roiModelScoreProbabilityMin) &&
-    passesUpper(roiModelProbability, filter.roiModelScoreProbabilityMax) &&
+    passesLower(roiModelProbability, filter.classifierScoreMin) &&
+    passesUpper(roiModelProbability, filter.classifierScoreMax) &&
     cellTypePass &&
     customMetricPass
   );
@@ -5375,7 +5390,7 @@ function morphologyReasons(metrics, dffMetrics, filter, roi = null) {{
   const oasisEventSnr = dffMetricValue(dffMetrics, "oasis_event_snr");
   const oasisRiseTau = dffMetricValue(dffMetrics, "oasis_rise_tau_seconds");
   const oasisDecayTau = dffMetricValue(dffMetrics, "oasis_decay_tau_seconds");
-  const roiModelProbability = metricValue(roi, "roi_model_score_probability");
+  const roiModelProbability = metricValue(roi, "classifier_score");
   const cellTypeFilter = Array.isArray(filter.cellTypeFilter) ? filter.cellTypeFilter : [];
   if (roi === null || roi === undefined) roi = data.dffMetrics.indexOf(dffMetrics);
   if (!passesLower(metrics.skew, filter.skewMin)) reasons.push(`skew ${{fmt(metrics.skew)}} below ${{filter.skewMin}}`);
@@ -5394,8 +5409,8 @@ function morphologyReasons(metrics, dffMetrics, filter, roi = null) {{
   if (!passesUpper(oasisRiseTau, filter.oasisRiseTauMax)) reasons.push(`inferred spike rise tau ${{fmt(oasisRiseTau)}} above ${{filter.oasisRiseTauMax}}`);
   if (!passesLower(oasisDecayTau, filter.oasisDecayTauMin)) reasons.push(`inferred spike decay tau ${{fmt(oasisDecayTau)}} below ${{filter.oasisDecayTauMin}}`);
   if (!passesUpper(oasisDecayTau, filter.oasisDecayTauMax)) reasons.push(`inferred spike decay tau ${{fmt(oasisDecayTau)}} above ${{filter.oasisDecayTauMax}}`);
-  if (!passesLower(roiModelProbability, filter.roiModelScoreProbabilityMin)) reasons.push(`ROI model probability ${{fmt(roiModelProbability)}} below ${{filter.roiModelScoreProbabilityMin}}`);
-  if (!passesUpper(roiModelProbability, filter.roiModelScoreProbabilityMax)) reasons.push(`ROI model probability ${{fmt(roiModelProbability)}} above ${{filter.roiModelScoreProbabilityMax}}`);
+  if (!passesLower(roiModelProbability, filter.classifierScoreMin)) reasons.push(`classifier score ${{fmt(roiModelProbability)}} below ${{filter.classifierScoreMin}}`);
+  if (!passesUpper(roiModelProbability, filter.classifierScoreMax)) reasons.push(`classifier score ${{fmt(roiModelProbability)}} above ${{filter.classifierScoreMax}}`);
   if (cellTypeFilter.length) {{
     const cellTypeValue = data.cellTypeLabels?.[roi];
     const passesCellType = cellTypeFilter.some(value =>
@@ -6822,7 +6837,7 @@ function metricSpreadsheetRows() {{
       categoryLabel: cellTypeLabelName(cellTypeCode),
       categoryCode: cellTypeCode,
       roiModelScoreState,
-      roiModelScoreProbability: roiModelScore?.probability ?? null,
+      classifierScore: roiModelScore?.probability ?? null,
       footprint: metrics.footprint,
       skew: metrics.skew,
       aspect: metrics.aspect,
@@ -6846,7 +6861,7 @@ function metricSpreadsheetRows() {{
         oasisEventSnr: !passesLower(oasisEventSnr, filter.oasisEventSnrMin),
         oasisRiseTau: !(passesLower(oasisRiseTau, filter.oasisRiseTauMin) && passesUpper(oasisRiseTau, filter.oasisRiseTauMax)),
         oasisDecayTau: !(passesLower(oasisDecayTau, filter.oasisDecayTauMin) && passesUpper(oasisDecayTau, filter.oasisDecayTauMax)),
-        roiModelScoreProbability: !(passesLower(roiModelScore?.probability, filter.roiModelScoreProbabilityMin) && passesUpper(roiModelScore?.probability, filter.roiModelScoreProbabilityMax)),
+        classifierScore: !(passesLower(roiModelScore?.probability, filter.classifierScoreMin) && passesUpper(roiModelScore?.probability, filter.classifierScoreMax)),
         customMetrics: customMetricFail,
       }},
       reason: reasons.join("; ") || "included",
@@ -6861,7 +6876,7 @@ function spreadsheetColumns() {{
     ["cell_identity_label", row => row.categoryLabel],
     ["cell_identity_code", row => row.categoryCode ?? ""],
     ["model_QC_label", row => row.roiModelScoreState],
-    ["model_probability", row => fmt(row.roiModelScoreProbability)],
+    ["classifier_score", row => fmt(row.classifierScore)],
     ["footprint", row => fmt(row.footprint)],
     ["skew", row => fmt(row.skew)],
     ["aspect_ratio", row => fmt(row.aspect)],
@@ -6994,7 +7009,7 @@ function currentSortSettings() {{
 }}
 function applySortSettings(sort) {{
   if (!sort || typeof sort !== "object") return false;
-  const wanted = Array.isArray(sort.metrics) && sort.metrics.length ? sort.metrics.map(String) : ["original"];
+  const wanted = Array.isArray(sort.metrics) && sort.metrics.length ? sort.metrics.map(String).map(m => m === "roi_model_score_probability" ? "classifier_score" : m) : ["original"];
   const inputs = Array.from(document.querySelectorAll('input[name="sortMetric"]'));
   const known = new Set(inputs.map(input => input.value));
   const usable = wanted.filter(metric => known.has(metric));
@@ -7237,7 +7252,7 @@ bindFovResizer(document.getElementById("fovSplitter"), "x");
 bindFovResizer(document.getElementById("fovResizeIcon"), "corner");
 layoutFovRow();
 if (document.readyState !== "complete") window.addEventListener("load", layoutFovRow);
-["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax","roiAreaMin","roiAreaMax","eventSnrMin","andreaPostdocSnrMin","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","roiModelScoreProbabilityMin","roiModelScoreProbabilityMax"].forEach(id => {{
+["skewMin","skewMax","maxConnect","aspectMin","aspectMax","compactMin","compactMax","roiAreaMin","roiAreaMax","eventSnrMin","andreaPostdocSnrMin","oasisEventSnrMin","oasisRiseTauMin","oasisRiseTauMax","oasisDecayTauMin","oasisDecayTauMax","classifierScoreMin","classifierScoreMax"].forEach(id => {{
   const element = document.getElementById(id);
   if (!element) return;
   element.addEventListener("change", evaluateFilter);
@@ -7294,7 +7309,7 @@ window.addEventListener("mouseup", () => {{ motionDragging=false; document.getEl
 document.getElementById("motionDriftCanvas").addEventListener("dblclick", reset);
 window.addEventListener("resize", () => {{ syncControlColumnHeight(); layoutFovRow(); }});
 const RANGE_LABEL_BUILT_IN = [
-  "roi_model_score_probability", "aspect", "compact", "connectivity", "roi_area", "skew",
+  "classifier_score", "aspect", "compact", "connectivity", "roi_area", "skew",
   "snr_95_50", "andrea_postdoc_snr", "oasis_event_snr", "oasis_rise_tau_seconds", "oasis_decay_tau_seconds",
 ];
 function rangeLabelMetrics() {{
