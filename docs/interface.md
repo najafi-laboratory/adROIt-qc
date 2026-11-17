@@ -81,7 +81,7 @@ second pass over the unsure ROIs.
 
 The **Bulk labeling menu** labels every visible ROI at once, or
 [labels ROIs from ranges of one metric](interface-reference.md#assigning-labels-to-metric-ranges),
-for example a classifier probability, so a rule plus a bulk label is a recorded decision
+for example a classifier score, so a rule plus a bulk label is a recorded decision
 rather than a long click sequence.
 
 ## Export

@@ -289,7 +289,7 @@ supply it.
 
 | Dataset or attribute | Content |
 |:---|:---|
-| `probability` | float per ROI: the classifier's probability that the ROI is good |
+| `classifier_score` | float per ROI from 0 to 1: the classifier's score, higher for ROIs it rates as more likely good (files that name this dataset `probability` are also read) |
 | `state` | string per ROI: `good`, `bad`, or `gray` for undetermined |
 | `suite2p_roi` or `roi` | optional original ROI index per row; otherwise rows are in ROI order |
 | attributes `good_threshold`, `bad_threshold` | the thresholds that produced `state` |
@@ -300,15 +300,23 @@ import h5py
 import numpy as np
 
 with h5py.File("roi_model_scores.h5", "w") as handle:
-    handle.create_dataset("probability", data=probability.astype(np.float64))
+    handle.create_dataset("classifier_score", data=scores.astype(np.float64))
     handle.create_dataset("state", data=np.array(states, dtype="S"))
-    handle.create_dataset("suite2p_roi", data=np.arange(len(probability)))
+    handle.create_dataset("suite2p_roi", data=np.arange(len(scores)))
     handle.attrs["good_threshold"] = 0.8
     handle.attrs["bad_threshold"] = 0.2
 ```
 
-The probability appears as **ROI model probability** under **Model Derived Metrics** in
-the Filter and Sort menus and as `model_probability` in the spreadsheet. The states
+The score appears as **Classifier score** under **Model Derived Metrics** in the Filter
+and Sort menus and as `classifier_score` in the spreadsheet.
+
+!!! note "A score, not a probability"
+    Most classifiers end in a sigmoid, so their output lies between 0 and 1, but unless the
+    classifier has been calibrated on held-out labels the value ranks ROIs rather than
+    estimating how often ROIs with that score are good. A score of 0.8 does not mean 80%
+    of such ROIs are good. Treat thresholds on it as ranking cutoffs.
+
+The states
 (`model_QC_label`) label ROIs only when the build sets
 `initialize_labels_from_model_scores: true`.
 

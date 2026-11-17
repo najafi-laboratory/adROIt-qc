@@ -255,10 +255,13 @@ from the session's files or from a `cell_identity_code` column; see
 [Uploaded metrics and categorical labels](inputs.md#uploaded-metrics-and-categorical-labels).
 Other categorical variables have the same kind of filter under Uploaded ROI Metrics.
 
-### ROI model probability
+### Classifier score
 
-- A classifier's per-ROI probability that the ROI is good, from `roi_model_scores.h5`
-  ([format](inputs.md#roi-model-scores)). Its filter has a minimum only.
+- A classifier's per-ROI output from 0 to 1, from `roi_model_scores.h5`
+  ([format](inputs.md#roi-model-scores)); higher means the classifier rates the ROI as more
+  likely good. Its filter has a minimum only.
+- It ranks ROIs but is not a calibrated probability: a score of 0.8 does not mean that 80%
+  of such ROIs are good.
 - The scores do not label ROIs unless the reviewer was built with label initialization,
   in which case ROIs open Good at or above the good threshold, Bad at or below the bad
   threshold, and Unsure in between.

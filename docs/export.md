@@ -44,7 +44,7 @@ back to its ROI, and uploaded metrics added later are included until you untick 
 | `roi_index` | The ROI's 0-based [original index](interface-reference.md#original-index-and-sort-position) |
 | `manual_QC_label` | `good`, `bad`, `unsure` or `not labeled` |
 | `cell_identity_label`, `cell_identity_code` | Cell type/compartment name and code |
-| `model_QC_label`, `model_probability` | The classifier's state and probability, when the session has [model scores](inputs.md#roi-model-scores) |
+| `model_QC_label`, `classifier_score` | The classifier's state and score, when the session has [model scores](inputs.md#roi-model-scores) |
 | `footprint`, `skew`, `aspect_ratio`, `compact`, `connectivity`, `roi_area_px` | [Morphology and trace metrics](metrics.md) |
 | `snr_95_50`, `caiman_exceptional_event_snr` | Trace SNR metrics |
 | `inferred_spike_snr`, `inferred_spike_rise_tau_seconds`, `inferred_spike_decay_tau_seconds` | Inferred spike metrics |

@@ -29,7 +29,7 @@ interface before building anything yourself.
 | Session | What it shows | Record |
 |:---|:---|:---|
 | Posterior parietal cortex, 225 ROIs | Two channels, excitatory/inhibitory cell-type labels; the session in every screenshot on this site | [https://sandbox.zenodo.org/records/620871](https://sandbox.zenodo.org/records/620871) |
-| Cerebellar dendrite, 2,702 ROIs | Classifier scores; set **ROI model probability** Min to 0.8 and press **Apply Filters** to keep 279 | [https://sandbox.zenodo.org/records/620873](https://sandbox.zenodo.org/records/620873) |
+| Cerebellar dendrite, 2,702 ROIs | Classifier scores; set **Classifier score** Min to 0.8 and press **Apply Filters** to keep 279 | [https://sandbox.zenodo.org/records/620873](https://sandbox.zenodo.org/records/620873) |
 
 1. Download the three files from a record into one folder.
 2. Open the reviewer in one of two ways:

@@ -29,7 +29,7 @@ see [Morphology metrics](interface-reference.md#morphology-metrics) and
 | Cell identity code | `cell_identity_code` | Integer cell type/compartment code ([sources](inputs.md#uploaded-metrics-and-categorical-labels)) | Categorical |
 | Cell identity label | `cell_identity_label` | Name of the code | Categorical |
 | **Model derived** | | | |
-| ROI model probability | `model_probability` | A classifier's probability that the ROI is good, from the [ROI model scores file](inputs.md#roi-model-scores) | Higher = more confident the ROI is good |
+| Classifier score | `classifier_score` | A classifier's 0 to 1 score from the [ROI model scores file](inputs.md#roi-model-scores); ranks ROIs, not a calibrated probability | Higher = rated more likely good |
 | **Fluorescence trace** | | | |
 | Skew | `skew` | Skewness of the fluorescence trace *(Suite2p)*. External masks: skewness of the raw fluorescence row | n/a |
 | SNR: 95/50 percentile | `snr_95_50` | Robust transient amplitude (95th − 50th percentile of dF/F) ÷ residual noise | Higher = stronger transients relative to noise |
