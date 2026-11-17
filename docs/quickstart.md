@@ -63,7 +63,8 @@ python scripts/validate_inputs.py data/my_session
 Then set `input_layout: external_rois` in your configuration and build as above.
 [Preparing your inputs](inputs.md) documents every file the layout accepts, and
 [Converting from CaImAn](inputs.md#converting-from-caiman) walks through a CaImAn
-result.
+result, as an example of adapting another tool's output rather than an optimized
+CaImAn analysis.
 
 ## Open the result
 

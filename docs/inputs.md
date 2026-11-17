@@ -339,7 +339,17 @@ not a gap-free run from 1, and writes dF/F and spikes as HDF5.
 ## Converting from CaImAn
 
 `examples/caiman/` holds a worked CaImAn path, run on the posterior parietal cortex
-demo session:
+demo session.
+
+!!! note "An example of adapting another workflow, not a recommended CaImAn analysis"
+    This example shows how the output, file formats and quality metrics of a different
+    tool can be mapped onto the reviewer's inputs. It is not a comprehensive or optimized
+    CaImAn session: it processes only the first four files (16,356 frames) with
+    near-default parameters, no parameter tuning and no neuropil estimate, and its
+    component counts say nothing about CaImAn's performance. Tune CaImAn for your own
+    data as its documentation describes, then use the same conversion.
+
+The two scripts:
 
 * `run_caiman.py` reads raw Bruker OME-TIFFs for one channel, runs CaImAn rigid motion
   correction and CNMF, evaluates the components, and saves the result with
@@ -370,6 +380,12 @@ python -m roi_reviewer.summary data/SESSION_caiman --input-layout external_rois 
 Component *k* becomes reviewer ROI *k*, so `roi_index` *k* in every export refers back to
 CaImAn component *k*. `caiman_metrics.csv` adds `caiman_snr`, `caiman_r_value` and the
 categorical `caiman_status` (accepted or rejected) as uploaded metrics.
+
+The same pattern applies to any other tool: write its masks and traces in the layout
+above, and put whatever per-ROI quality measures or decisions it produces into an
+uploaded metric file, numeric columns for scores and `NAME_code` columns for categorical
+decisions, so they can be filtered, sorted and exported alongside the reviewer's own
+metrics.
 
 ## Validate before you build
 

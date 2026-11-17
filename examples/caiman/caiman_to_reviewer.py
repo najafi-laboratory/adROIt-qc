@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Convert a CaImAn CNMF result into the reviewer's external-ROI input layout.
 
+This is an example of adapting another tool's output, file formats and quality metrics to the
+reviewer's inputs, not a comprehensive or optimized CaImAn analysis: parameters are near CaImAn's
+defaults and untuned, and no neuropil is estimated. Tune CaImAn for your own data.
+
     python examples/caiman/caiman_to_reviewer.py \
         --cnmf  caiman_out/cnmf_results.hdf5 \
         --movie caiman_out/memmap_d1_512_d2_512_d3_1_order_C_frames_16380.mmap \

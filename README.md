@@ -107,7 +107,8 @@ python scripts/validate_inputs.py data/my_session
 Sparse `(pixels, n_rois)` component matrices from CaImAn-style pipelines are
 accepted directly as `spatial_components.npz`; supply `flatten_order: "F"`
 unless your pixel indices are row-major. `examples/caiman/` runs CaImAn on raw
-TIFFs and converts its result into this layout.
+TIFFs and converts its result into this layout. It is an example of adapting another
+tool's outputs and quality metrics, not a comprehensive or optimized CaImAn analysis.
 
 **The one thing no tool can check for you** is whether mask label *k* really
 belongs to trace row *k−1*. A mismatch produces a reviewer in which every mask
@@ -131,7 +132,7 @@ them into `data/demo/` once the archive record is set at the top of that script.
 config/
   template.yaml              commented starting point, one per session
   demo/                      lab-specific examples; delete for a clean start
-examples/caiman/             CaImAn run and CaImAn-to-reviewer converter
+examples/caiman/             example: CaImAn run and CaImAn-to-reviewer converter
 tests/                       validation suite: every input and output, and the page in a browser
 scripts/
   build_reviewer.py          config -> reviewer, writes run.json

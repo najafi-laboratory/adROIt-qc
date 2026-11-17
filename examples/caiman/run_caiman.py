@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Run CaImAn motion correction and CNMF on part of a Bruker two-photon session.
 
+This is an example of adapting another tool's output, file formats and quality metrics to the
+reviewer's inputs, not a comprehensive or optimized CaImAn analysis: parameters are near CaImAn's
+defaults and untuned, and no neuropil is estimated. Tune CaImAn for your own data.
+
 Example used for the reviewer docs (PPC session, functional channel 2):
 
     python examples/caiman/run_caiman.py \
