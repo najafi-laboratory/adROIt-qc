@@ -17,6 +17,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -72,13 +73,25 @@ def main() -> int:
     np.save(out / "rigid_shifts.npy", shifts)
     print(f"motion corrected ({time.time() - t0:.0f} s); max |shift| {np.abs(shifts).max():.1f} px", flush=True)
     fname_new = cm.save_memmap(mc.mmap_file, base_name=str(out / "memmap_"), order="C", border_to_0=0, dview=dview)
+    # Recent CaImAn writes memmaps under CAIMAN_DATA/temp whatever base_name says: move the C-order
+    # movie next to the other outputs and drop the F-order motion-corrected copy.
+    if Path(fname_new).parent.resolve() != out.resolve():
+        moved = out / Path(fname_new).name
+        shutil.move(fname_new, moved)
+        fname_new = str(moved)
+    for path in (mc.mmap_file if isinstance(mc.mmap_file, (list, tuple)) else [mc.mmap_file]):
+        if path and Path(path).exists() and Path(path).resolve() != Path(fname_new).resolve():
+            Path(path).unlink()
     Yr, dims, T = cm.load_memmap(fname_new)
     images = np.reshape(Yr.T, [T] + list(dims), order="F")
     cm.stop_server(dview=dview)
     _, dview, n_proc = cm.cluster.setup_cluster(backend="multiprocessing", n_processes=args.processes, single_thread=False)
     cnm = cnmf.CNMF(n_proc, params=opts, dview=dview)
-    cnm = cnm.fit(images)
-    cnm = cnm.refit(images, dview=dview)
+    # Recent CaImAn versions fit in place and return None; older ones return the object.
+    fitted = cnm.fit(images)
+    cnm = fitted if fitted is not None else cnm
+    refitted = cnm.refit(images, dview=dview)
+    cnm = refitted if refitted is not None else cnm
     cnm.estimates.evaluate_components(images, cnm.params, dview=dview)
     try:
         cn = cm.local_correlations(images[::10].transpose(1, 2, 0), swap_dim=False)
