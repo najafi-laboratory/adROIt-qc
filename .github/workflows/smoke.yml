@@ -114,3 +114,9 @@ jobs:
           assert "--filter-set soma" in out, out
           print("config-to-flag mapping holds; unknown fields rejected; former target_structure accepted")
           PY
+
+      - name: Validation test suite (inputs, outputs, converters, and the page in a browser)
+        run: |
+          pip install pytest playwright
+          python -m playwright install --with-deps chromium
+          pytest -q -rs tests
