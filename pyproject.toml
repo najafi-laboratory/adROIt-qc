@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "roi-reviewer"
-version = "0.1.0"
-description = "Interactive ROI quality-control reviewer for two-photon calcium imaging sessions"
+name = "adroit-qc"
+version = "0.2.0"
+description = "adROIt-qc: interactive, self-contained ROI quality-control reviewer for two-photon calcium imaging sessions"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.scripts]
-roi-reviewer = "roi_reviewer.summary:main"
+adroit-qc = "adroit_qc.summary:main"
+roi-reviewer = "adroit_qc.summary:main"
 
 [tool.setuptools]
-packages = ["roi_reviewer"]
+packages = ["adroit_qc", "roi_reviewer"]

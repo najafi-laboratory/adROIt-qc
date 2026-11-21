@@ -63,7 +63,7 @@ label of ROI `i`, whatever filtering or sorting happened during review. Placed b
 Suite2p files, it is read by the loader shipped with the package:
 
 ```python
-from roi_reviewer.roi_metrics import load_reviewed_dff
+from adroit_qc.roi_metrics import load_reviewed_dff
 
 session = load_reviewed_dff("/path/to/session")
 dff         = session["dff"]          # (selected_rois, frames)

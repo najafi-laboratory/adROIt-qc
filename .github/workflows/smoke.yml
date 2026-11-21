@@ -25,8 +25,8 @@ jobs:
                   return None
 
           sys.meta_path.insert(0, Block())
-          import roi_reviewer.summary  # noqa: F401
-          print("roi_reviewer imports with utils_2p blocked")
+          import adroit_qc.summary  # noqa: F401
+          print("adroit_qc imports with utils_2p blocked")
           PY
 
       - name: Build a synthetic session, convert it, and check the contract
@@ -62,7 +62,7 @@ jobs:
 
       - name: Generate a reviewer end to end
         run: |
-          python -m roi_reviewer.summary build/session --output-dir build/out --roi-index-label "Original Index"
+          python -m adroit_qc.summary build/session --output-dir build/out --roi-index-label "Original Index"
           test -f build/out/*_interactive_fov_roi_dff.html || (echo "no reviewer written"; exit 1)
           python - <<'PY'
           import glob, pathlib

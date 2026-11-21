@@ -7,21 +7,23 @@ reference for every input file; the other pages link here.
 
 ## The documented layout
 
-`scripts/make_standard_inputs.py` writes a directory in this form, and
-`scripts/validate_inputs.py` checks one against it.
+`adroit_qc.inputs` writes each of these files from Python arrays
+([helpers](reference.md#helper-functions)), `scripts/make_standard_inputs.py` writes a
+directory in this form from array files, and `scripts/validate_inputs.py` (or
+`python -m adroit_qc.validate`) checks one against it.
 
 | File | Meaning |
 |---|---|
 | `roi_mask.npy` | dense 2-D integer label image, one integer per pixel naming the ROI it belongs to; see [Dense label masks](#dense-label-masks) |
 | `spatial_components.npz` | alternative to the above: sparse `(pixels, n_rois)` component matrix |
-| `F.npy`, `Fneu.npy` | raw fluorescence and neuropil, `(n_rois, n_frames)` float32, C-ordered |
-| `dff.h5` (dataset `dff`) | optional precomputed dF/F, `(n_rois, n_frames)` float32 |
+| `F.npy`, `Fneu.npy` | raw fluorescence and, optionally, neuropil, `(n_rois, n_frames)` float32, C-ordered; without `Fneu.npy` nothing is subtracted |
+| `dff.h5` (dataset `dff`) | optional precomputed dF/F, `(n_rois, n_frames)` float32, displayed and measured as given |
 | `spikes.h5` (dataset `spikes`) | optional inferred spikes from any method, same shape: amplitudes, rates, probabilities, counts or signed values |
 | `mean_func.npy`, `mean_anat.npy` | optional functional and anatomical mean images, `(Ly, Lx)`; see [Mean images](#mean-images) |
 | `roi_cell_type_labels.npy` | optional per-ROI cell type codes; see [Uploaded metrics and categorical labels](#uploaded-metrics-and-categorical-labels) |
 | `move_offset.h5` | optional rigid shifts per frame; see [Motion offsets](#motion-offsets) |
 | `iscell.npy` | optional `(n_rois, 2)` upstream accept/reject and probability |
-| `external_roi_metadata.json` | `image_shape` and `flatten_order` (needed for sparse components without an image), and optionally `frame_rate` and `diameter` |
+| `external_roi_metadata.json` | `image_shape` and `flatten_order` (needed for sparse components without an image), and optionally `frame_rate` (Hz, default 30), `diameter` (pixels) and `neuropil_coefficient` (default 0.7) |
 
 Sparse component matrices from CaImAn-style pipelines are accepted directly; supply
 `flatten_order: "F"` in the metadata file unless your pixel indices are row-major.
@@ -47,7 +49,13 @@ Sparse component matrices from CaImAn-style pipelines are accepted directly; sup
     output side, in the sidecars the browser reads, where a header simple enough to
     parse in a few lines of JavaScript is what keeps the reviewer self-contained.
 
-If `dff.h5` is absent the generator computes dF/F from `F.npy` and `Fneu.npy`.
+**dF/F.** If `dff.h5` is present it is used as given, so dF/F from any method (your own
+baseline, CaImAn's `F_dff`, a different neuropil model) can be reviewed; it must have the
+same shape as `F.npy`, which is still required. Otherwise the generator computes dF/F
+as Suite2p does: `F − c·Fneu`, divided by its Gaussian-filtered baseline, with `c` the
+`neuropil_coefficient` from the metadata file (default 0.7) and no subtraction when
+`Fneu.npy` is absent. `dff.h5` is read only in this layout; Suite2p sessions always
+compute dF/F from their own traces.
 Inferred spikes have no such fallback: without `spikes.h5`, the spike overlay and
 every inferred-spike metric are unavailable, and the reviewer says so rather than
 showing an empty panel.
@@ -372,7 +380,7 @@ python examples/caiman/caiman_to_reviewer.py --cnmf caiman_out/cnmf_results.hdf5
     --movie caiman_out/memmap_*order_C_frames_*.mmap --shifts caiman_out/rigid_shifts.npy \
     --frame-rate 30 --out data/SESSION_caiman
 python scripts/validate_inputs.py data/SESSION_caiman
-python -m roi_reviewer.summary data/SESSION_caiman --input-layout external_rois \
+python -m adroit_qc.summary data/SESSION_caiman --input-layout external_rois \
     --custom-roi-metrics data/SESSION_caiman/caiman_metrics.csv
 ```
 

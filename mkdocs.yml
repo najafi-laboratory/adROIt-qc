@@ -1,8 +1,8 @@
-site_name: roi-reviewer-demo
+site_name: adROIt-qc
 site_description: Build a self-contained ROI quality-control reviewer from any segmentation output
 site_url: !ENV [SITE_URL, '']
-repo_url: https://github.com/najafi-laboratory/roi-reviewer-demo
-repo_name: najafi-laboratory/roi-reviewer-demo
+repo_url: https://github.com/najafi-laboratory/adROIt-qc
+repo_name: najafi-laboratory/adROIt-qc
 
 theme:
   name: readthedocs
@@ -23,6 +23,7 @@ nav:
   - Overview: index.md
   - Getting Started:
       - Quickstart: quickstart.md
+      - Tutorial: tutorial.md
       - Preparing Your Inputs: inputs.md
       - Build Settings: cli-mapping.md
   - The Reviewer:
@@ -31,4 +32,5 @@ nav:
       - Metric Reference: metrics.md
       - Export and Downstream Use: export.md
   - Reference:
+      - Inputs, Settings and Helpers: reference.md
       - Demo Sessions: demo-sessions.md

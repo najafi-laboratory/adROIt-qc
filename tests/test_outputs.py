@@ -41,13 +41,13 @@ def test_force_embed_true_and_limit(dense_session, tmp_path):
 
 
 def test_embed_limit_must_exceed_two_mb():
-    r = run_script("-m", "roi_reviewer.summary", "x", "--embed-limit-mb", "1")
+    r = run_script("-m", "adroit_qc.summary", "x", "--embed-limit-mb", "1")
     assert r.returncode == 2 and "embed" in r.stderr.lower()
 
 
 @pytest.mark.parametrize("value,ok", [("true", True), ("FALSE", True), ("1", True), ("no", True), ("maybe", False)])
 def test_force_embed_values(value, ok):
-    from roi_reviewer import summary as ps
+    from adroit_qc import summary as ps
     if ok:
         assert ps._parse_bool_flag(value) in (True, False)
     else:
@@ -76,7 +76,7 @@ def test_html_only_keeps_data_and_title(dense_session, tmp_path):
 
 
 def test_label_export_round_trip(suite2p_session, tmp_path):
-    from roi_reviewer import roi_metrics as rm
+    from adroit_qc import roi_metrics as rm
     stat = np.load(suite2p_session / "suite2p/plane0/stat.npy", allow_pickle=True)
     export = {"suite2p_roi_count": N_ROIS, "suite2p_stat_fingerprint": rm.suite2p_stat_fingerprint(stat),
               "labels": [{"suite2p_roi": k, "label": [1, 0, 2, None, 1, 0][k]} for k in range(N_ROIS)]}
@@ -87,7 +87,7 @@ def test_label_export_round_trip(suite2p_session, tmp_path):
 
 
 def test_label_export_rejects_other_sessions(suite2p_session, tmp_path):
-    from roi_reviewer import roi_metrics as rm
+    from adroit_qc import roi_metrics as rm
     f = tmp_path / "labels.json"
     f.write_text(json.dumps({"suite2p_roi_count": N_ROIS + 1, "labels": []}))
     with pytest.raises(ValueError):

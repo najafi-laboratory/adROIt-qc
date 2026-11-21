@@ -34,7 +34,7 @@ jobs:
 
       - name: Build docs site
         env:
-          SITE_URL: https://najafi-laboratory.github.io/roi-reviewer-demo/
+          SITE_URL: https://najafi-laboratory.github.io/adROIt-qc/
         run: mkdocs build --strict
 
       # mkdocs --strict does not notice an image that was never rendered (for example

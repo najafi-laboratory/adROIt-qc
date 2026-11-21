@@ -1,4 +1,4 @@
-name: roi-reviewer
+name: adroit-qc
 channels:
   - conda-forge
 dependencies:

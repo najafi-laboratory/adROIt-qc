@@ -1,13 +1,14 @@
-# roi-reviewer-demo
+# adROIt-qc
 
-A minimal, copyable project layout for generating interactive ROI quality-control
+adROIt-qc builds interactive, self-contained ROI quality-control
 reviewers from two-photon calcium imaging sessions, whatever software produced
 the segmentation.
 
 This repository is standalone. It carries its own copy of the generator in
-`roi_reviewer/` (see `VENDOR.md` for where that code came from), so nothing here
+`adroit_qc/` (see `VENDOR.md` for where that code came from), so nothing here
 installs or imports a laboratory package, and it runs for anyone with the
-dependencies in `environment.yml`. Around the generator it provides: one configuration file per session, a converter that puts arbitrary
+dependencies in `environment.yml`. Around the generator it provides: one configuration file per session, Python helpers
+(`adroit_qc.inputs`) that write every input file from arrays, a converter that puts arbitrary
 segmentation output into the documented input layout, a validator that catches
 the mistakes that otherwise surface as a silently wrong reviewer, and a build
 script that records how each output was produced.
@@ -15,8 +16,9 @@ script that records how each output was produced.
 ## Documentation
 
 The full documentation is in `docs/` and is published as a site at
-<https://najafi-laboratory.github.io/roi-reviewer-demo/>: a quickstart, the
-input contract, every configuration field, a tour of the reviewer interface,
+<https://najafi-laboratory.github.io/adROIt-qc/>: a quickstart, a tutorial that
+builds reviewers from every kind of input, a one-page list of inputs, settings and
+helpers, the input contract, every configuration field, a tour of the reviewer interface,
 the mapping between command-line flags, configuration fields and reviewer
 controls, and the demo sessions. To read it locally:
 
@@ -28,17 +30,17 @@ mkdocs serve
 ## Installation
 
 ```bash
-git clone https://github.com/najafi-laboratory/roi-reviewer-demo
-cd roi-reviewer-demo
+git clone https://github.com/najafi-laboratory/adROIt-qc
+cd adROIt-qc
 pip install -e .          # or: conda env create -f environment.yml
 ```
 
-That is the whole dependency story. The generator is vendored in `roi_reviewer/` (see `VENDOR.md`), so no laboratory package is installed or imported, and `python -m roi_reviewer.summary --help` works immediately.
+That is the whole dependency story. The generator is vendored in `adroit_qc/` (see `VENDOR.md`; `roi_reviewer` remains as an import alias), so no laboratory package is installed or imported, and `python -m adroit_qc.summary --help` works immediately.
 
 ## Quickstart
 
 ```bash
-conda env create -f environment.yml && conda activate roi-reviewer-demo
+conda env create -f environment.yml && conda activate adroit-qc
 
 cp config/template.yaml config/my_session.yaml   # edit session_path and output_dir
 python scripts/build_reviewer.py config/my_session.yaml --dry-run
@@ -129,10 +131,17 @@ them into `data/demo/` once the archive record is set at the top of that script.
 ## Layout
 
 ```
+adroit_qc/
+  summary.py                 the generator (python -m adroit_qc.summary)
+  inputs.py                  write every input file from Python arrays
+  validate.py                check a directory against the input contract
+  roi_metrics.py             metric definitions and downstream loaders
+roi_reviewer/                import alias for the package's previous name
 config/
   template.yaml              commented starting point, one per session
   demo/                      lab-specific examples; delete for a clean start
 examples/caiman/             example: CaImAn run and CaImAn-to-reviewer converter
+examples/tutorial/           build_examples.py: one reviewer per input route (docs: Tutorial)
 tests/                       validation suite: every input and output, and the page in a browser
 scripts/
   build_reviewer.py          config -> reviewer, writes run.json
@@ -143,3 +152,10 @@ scripts/
 data/                        inputs (git-ignored)
 outputs/                     generated reviewers (git-ignored)
 ```
+
+## Contributing
+
+adROIt-qc is open source. Issues, forks and pull requests are welcome; run
+`pytest tests` before opening a pull request. To support another pipeline's output,
+write a converter to the [documented input layout](https://najafi-laboratory.github.io/adROIt-qc/inputs/#the-documented-layout)
+(see `examples/caiman/` for one) rather than changing the generator.

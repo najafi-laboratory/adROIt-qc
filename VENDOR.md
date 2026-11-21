@@ -1,36 +1,43 @@
-# Vendored code
+# Two copies of the generator
 
-`roi_reviewer/` is a copy of the summary-generation stage from
-[najafi-laboratory/2p_imaging](https://github.com/najafi-laboratory/2p_imaging),
-not a dependency on it. Nothing here imports `utils_2p`, and the repository runs
-for anyone, with or without access to that repository.
+The generator exists in two places that are kept identical apart from one import line:
 
-| file | copied from | at |
-|---|---|---|
-| `roi_reviewer/summary.py` | `utils_2p/processing_summary.py` | `d24d1ab776` (claude/reviewer-updates) |
-| `roi_reviewer/roi_metrics.py` | `utils_2p/roi_labels.py` | `d24d1ab776` (claude/reviewer-updates) |
+| here | laboratory copy in [najafi-laboratory/2p_imaging](https://github.com/najafi-laboratory/2p_imaging) |
+|---|---|
+| `adroit_qc/summary.py` | `utils_2p/processing_summary.py` |
+| `adroit_qc/roi_metrics.py` | `utils_2p/roi_labels.py` |
 
-Copied on 2026-10-15. The only edit applied was the import rewrite
-`utils_2p.roi_labels` to `roi_reviewer.roi_metrics`.
+This repository does not depend on the laboratory one: nothing here imports `utils_2p`,
+and it runs for anyone. The laboratory pipeline calls its copy as its `summary` stage.
 
-## Re-syncing
+The import rewrite is `from adroit_qc.roi_metrics import` here and
+`from utils_2p.roi_labels import` there. The first lines of each file name its
+counterpart. (The package here was called `roi_reviewer` until 2026-11-21;
+`roi_reviewer` remains as an import alias.)
 
-A copy drifts. To pull a later version:
+## Keeping them in step
+
+Since adroit-qc 0.2.0 this repository is the source: make interface changes here, run
+`pytest tests`, then copy to the laboratory repository:
 
 ```bash
-git -C /path/to/2p_imaging log --oneline -- utils_2p/processing_summary.py utils_2p/roi_labels.py
-cp /path/to/2p_imaging/utils_2p/processing_summary.py roi_reviewer/summary.py
-cp /path/to/2p_imaging/utils_2p/roi_labels.py        roi_reviewer/roi_metrics.py
-sed -i 's/from utils_2p.roi_labels import/from roi_reviewer.roi_metrics import/' roi_reviewer/summary.py
+python - <<'EOF'
+from pathlib import Path
+src = Path("adroit_qc/summary.py").read_text().split("\n")
+lab = [src[0],
+       "# Synced from najafi-laboratory/adROIt-qc adroit_qc/summary.py (adroit-qc <version>).",
+       "# Make interface changes there and copy them here; see docs/adroit-qc-lab-guide.md."] + src[5:]
+text = "\n".join(lab).replace("from adroit_qc.roi_metrics import (", "from utils_2p.roi_labels import (", 1)
+Path("/path/to/2p_imaging/utils_2p/processing_summary.py").write_text(text)
+EOF
 ```
 
-Then restore the header comment on each file, update the commits in the table
-above, and run the smoke test in `.github/workflows/smoke.yml` before committing.
+`roi_metrics.py` and `roi_labels.py` differ only in their header comments; copy the body
+the same way when it changes.
 
 ## Deliberate divergences
 
-- The saved-filter schema identifier is still `utils_2p_roi_metric_filter_v1`.
-  It is left unchanged so filter files are interchangeable between this tool and
-  the laboratory pipeline.
-- Help links inside the generated HTML point at the `2p_imaging` documentation
-  site, which is where the reviewer is documented in depth.
+- The saved-filter schema identifier is still `utils_2p_roi_metric_filter_v1`, so filter
+  files are interchangeable between this tool and the laboratory pipeline.
+- Both copies generate identical pages; every help link in the page points at this
+  repository's documentation site.

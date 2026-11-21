@@ -4,7 +4,7 @@ A setting reaches the reviewer by one of three routes:
 
 1. **A configuration field.** `scripts/build_reviewer.py` translates each field into
    exactly one generator flag.
-2. **A generator flag.** Pass it directly to `python -m roi_reviewer.summary`, or let
+2. **A generator flag.** Pass it directly to `python -m adroit_qc.summary`, or let
    the configuration supply it.
 3. **A control in the open reviewer.** These act on the page in the browser; several
    have a build-time counterpart, listed [below](#controls-with-a-build-time-counterpart).
@@ -142,7 +142,7 @@ python scripts/build_reviewer.py config/example_session.yaml
 and the equivalent command, run from the repository root:
 
 ```bash
-python -m roi_reviewer.summary data/example_session \
+python -m adroit_qc.summary data/example_session \
     --output-dir outputs/example_session \
     --input-layout external_rois \
     --roi-index-label "Original Index" \

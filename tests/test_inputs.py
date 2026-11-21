@@ -81,7 +81,7 @@ def test_roi_model_scores(dense_session, tmp_path):
 # ---------- uploaded metrics and categorical labels (command line) ----------
 
 def load_custom(tmp_path, text, name="m.csv"):
-    from roi_reviewer import summary as ps
+    from adroit_qc import summary as ps
     path = tmp_path / name; path.write_text(text)
     return ps._load_custom_roi_metrics([str(path)], N_ROIS, np.arange(N_ROIS))
 

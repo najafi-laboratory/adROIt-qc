@@ -1,3 +1,4 @@
-"""Standalone interactive ROI quality-control reviewer."""
+"""Deprecated alias: the package is now ``adroit_qc``. Existing ``roi_reviewer`` imports and
+``python -m roi_reviewer.summary`` keep working."""
 
-__all__ = ["summary", "roi_metrics"]
+from adroit_qc import *  # noqa: F401,F403

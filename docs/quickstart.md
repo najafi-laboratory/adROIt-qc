@@ -3,8 +3,8 @@
 ## Install
 
 ```bash
-git clone https://github.com/najafi-laboratory/roi-reviewer-demo
-cd roi-reviewer-demo
+git clone https://github.com/najafi-laboratory/adROIt-qc
+cd adROIt-qc
 pip install -e .
 ```
 
@@ -12,7 +12,7 @@ Or, with conda:
 
 ```bash
 conda env create -f environment.yml
-conda activate roi-reviewer-demo
+conda activate adroit-qc
 pip install -e .
 ```
 
@@ -20,7 +20,7 @@ That is the whole dependency story: numpy, scipy, h5py, matplotlib, Pillow and P
 Confirm the generator is importable:
 
 ```bash
-python -m roi_reviewer.summary --help
+python -m adroit_qc.summary --help
 ```
 
 ## Build a reviewer from a Suite2p session

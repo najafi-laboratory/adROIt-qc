@@ -1,4 +1,4 @@
-# ROI reviewer demo
+# adROIt-qc
 
 This repository builds an interactive, self-contained reviewer for region-of-interest
 quality control in two-photon calcium imaging. You point it at a processed session and
@@ -13,7 +13,8 @@ and saves the reviewed state back into another self-contained copy.
 
 ## What this repository is for
 
-It is a worked, runnable example. The generator here reads a documented input layout,
+adROIt-qc is open source; issues, forks and pull requests are welcome on
+[GitHub](https://github.com/najafi-laboratory/adROIt-qc). The generator here reads a documented input layout,
 so output from any segmentation or deconvolution software can be reviewed, not only
 Suite2p. Use it to
 
@@ -31,7 +32,7 @@ Suite2p. Use it to
 ```
 your segmentation output
         |
-        |  scripts/make_standard_inputs.py        (optional converter)
+        |  adroit_qc.inputs / scripts/make_standard_inputs.py   (optional converters)
         v
 documented input layout  ---->  scripts/validate_inputs.py   (check before building)
         |
@@ -55,6 +56,10 @@ are selected with **Load dF/F** and **Load inferred spikes** when it is opened f
 * [Demo Sessions](demo-sessions.md#try-them-without-installing-anything) links two
   example reviewers you can download and open in a browser right away.
 * [Quickstart](quickstart.md) installs the package and builds a reviewer.
+* [Tutorial](tutorial.md) goes from installation to reviewers built from every kind of
+  input, by hand and from one script.
+* [Inputs, settings and helpers](reference.md) lists every input file, build setting and
+  helper function on one page.
 * [Preparing Your Inputs](inputs.md) is the input contract, including the one
   correspondence no tool can check for you.
 * [Build Settings](cli-mapping.md) documents every configuration field and flag.

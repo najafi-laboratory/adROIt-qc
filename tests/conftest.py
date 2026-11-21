@@ -100,7 +100,7 @@ def sparse_session(tmp_path: Path) -> Path:
 
 
 def build(session: Path, out: Path, **kwargs) -> tuple[Path, dict]:
-    from roi_reviewer import summary as ps
+    from adroit_qc import summary as ps
     kwargs.setdefault("input_layout", "suite2p" if (session / "suite2p").exists() else "external_rois")
     _, html = ps.create_preprocessing_summary(session, out, **kwargs)
     return Path(html), payload_of(Path(html))
