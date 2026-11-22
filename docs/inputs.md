@@ -2,8 +2,9 @@
 
 The reviewer needs two things, where each ROI is and what its fluorescence did over
 time, and can use more: inferred spikes from any method, mean images, motion offsets,
-classifier scores and your own per-ROI metrics and labels. This page is the single
-reference for every input file; the other pages link here.
+classifier scores and your own per-ROI metrics and labels. This page explains each
+input format in full; [Inputs, settings and helpers](reference.md) lists them all on
+one page.
 
 ## The documented layout
 
@@ -12,18 +13,9 @@ reference for every input file; the other pages link here.
 directory in this form from array files, and `scripts/validate_inputs.py` (or
 `python -m adroit_qc.validate`) checks one against it.
 
-| File | Meaning |
-|---|---|
-| `roi_mask.npy` | dense 2-D integer label image, one integer per pixel naming the ROI it belongs to; see [Dense label masks](#dense-label-masks) |
-| `spatial_components.npz` | alternative to the above: sparse `(pixels, n_rois)` component matrix |
-| `F.npy`, `Fneu.npy` | raw fluorescence and, optionally, neuropil, `(n_rois, n_frames)` float32, C-ordered; without `Fneu.npy` nothing is subtracted |
-| `dff.h5` (dataset `dff`) | optional precomputed dF/F, `(n_rois, n_frames)` float32, displayed and measured as given |
-| `spikes.h5` (dataset `spikes`) | optional inferred spikes from any method, same shape: amplitudes, rates, probabilities, counts or signed values |
-| `mean_func.npy`, `mean_anat.npy` | optional functional and anatomical mean images, `(Ly, Lx)`; see [Mean images](#mean-images) |
-| `roi_cell_type_labels.npy` | optional per-ROI cell type codes; see [Uploaded metrics and categorical labels](#uploaded-metrics-and-categorical-labels) |
-| `move_offset.h5` | optional rigid shifts per frame; see [Motion offsets](#motion-offsets) |
-| `iscell.npy` | optional `(n_rois, 2)` upstream accept/reject and probability |
-| `external_roi_metadata.json` | `image_shape` and `flatten_order` (needed for sparse components without an image), and optionally `frame_rate` (Hz, default 30), `diameter` (pixels) and `neuropil_coefficient` (default 0.7) |
+Every file in the layout, with its shape and the helper that writes it, is listed in
+[Inputs, settings and helpers](reference.md#input-files). The sections below explain
+the formats that need more than a line.
 
 Sparse component matrices from CaImAn-style pipelines are accepted directly; supply
 `flatten_order: "F"` in the metadata file unless your pixel indices are row-major.
@@ -148,7 +140,7 @@ session shown throughout these docs.
 |:---|:---|
 | Shape, dtype | `(512, 512)`, `int16` |
 | Labels | `1..225`, gap-free, so label *k* is row *k − 1* |
-| Matches | the 225 rows of the session's `F.npy`, and of the `_dff.npy` and `_inferred_spikes.npy` arrays in its [archived record](demo-sessions.md#try-them-without-installing-anything) |
+| Matches | the 225 rows of the session's `F.npy`, and of the `_dff.npy` and `_inferred_spikes.npy` arrays in its [archived record](tutorial.md#try-the-reviewer-without-installing-anything) |
 | ROI pixels | 12,614 of 262,144; median 56 per ROI |
 
 ```python
@@ -315,8 +307,10 @@ with h5py.File("roi_model_scores.h5", "w") as handle:
     handle.attrs["bad_threshold"] = 0.2
 ```
 
-The score appears as **Classifier score** under **Model Derived Metrics** in the Filter
-and Sort menus and as `classifier_score` in the spreadsheet.
+`adroit_qc.inputs.write_classifier_scores` writes this file from an array of scores and
+two thresholds ([helpers](reference.md#helper-functions)). The score appears as
+**Classifier score** under **Model Derived Metrics** in the Filter and Sort menus and as
+`classifier_score` in the spreadsheet.
 
 !!! note "A score, not a probability"
     Most classifiers end in a sigmoid, so their output lies between 0 and 1, but unless the

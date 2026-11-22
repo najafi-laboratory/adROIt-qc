@@ -34,6 +34,20 @@ result for the first one:
 The CaImAn session is an example of adapting another tool's output and metrics to these
 inputs, not an optimized CaImAn analysis.
 
+### Try the reviewer without installing anything
+
+Two reviewers built from these sessions are on the Zenodo sandbox, with their trace
+arrays, so you can explore the interface first:
+
+| Session | What it shows | Record |
+|:---|:---|:---|
+| Posterior parietal cortex, 225 ROIs | Two channels and excitatory/inhibitory cell type labels; the session in the screenshots on this site | [sandbox.zenodo.org/records/620871](https://sandbox.zenodo.org/records/620871) |
+| Cerebellar dendrites | Classifier scores; set **Classifier score** Min to 0.8 and press **Apply Filters** | [sandbox.zenodo.org/records/620873](https://sandbox.zenodo.org/records/620873) |
+
+Download the three files of a record into one folder and open the HTML as in
+[Open it](#open-it). These are test records built from an earlier version of the
+interface; they will be replaced by records on zenodo.org with permanent DOIs.
+
 ## Part 1: Install
 
 You need Python 3.9 or newer.
@@ -60,8 +74,17 @@ export ADROIT_QC_EXAMPLES=/storage/project/r-fnajafi3-0/shared/2P_Imaging/adroit
 ls $ADROIT_QC_EXAMPLES/sessions
 ```
 
-The package installs two equivalent commands, `adroit-qc` and `python -m
-adroit_qc.summary`. The older name `roi_reviewer` still works as an alias.
+The only dependencies are numpy, scipy, h5py, matplotlib, Pillow and PyYAML. The
+package installs two equivalent commands, `adroit-qc` and `python -m adroit_qc.summary`;
+the older name `roi_reviewer` still works as an alias.
+
+To check an installation, run the test suite. It builds small synthetic sessions in
+every input layout and checks that each input reaches the reviewer unchanged:
+
+```bash
+pip install pytest
+pytest -q tests        # browser tests are skipped unless Playwright is installed
+```
 
 ## Part 2: One reviewer, built and loaded by hand
 
@@ -80,18 +103,38 @@ it wrote: `VTYH01_PPC_20250212_1451ShortLong_interactive_fov_roi_dff.html`, a PD
 summary and, because this session is larger than the embedding limit, two arrays beside
 the HTML, `..._dff.npy` and `..._inferred_spikes.npy`.
 
-The same build from a configuration file is
-`python scripts/build_reviewer.py config/my_session.yaml`; see
-[Build settings](cli-mapping.md).
+**The same build from a configuration file.** One session, one file: copy
+`config/template.yaml` (every field is documented in its comments), set `session_path`
+and `output_dir`, and build. `--dry-run` resolves the paths and prints the generator
+command without writing anything; a real build also writes `run.json`, recording the
+resolved paths and options, beside the outputs.
+
+```bash
+cp config/template.yaml config/my_session.yaml
+python scripts/build_reviewer.py config/my_session.yaml --dry-run
+python scripts/build_reviewer.py config/my_session.yaml
+```
+
+Every field and flag is listed in [Inputs, settings and helpers](reference.md#build-settings).
 
 ### Open it
 
-Copy `tutorial_out/manual/` to your computer if you built it on a cluster, then either
+Copy `tutorial_out/manual/` to your computer if you built it on a cluster. Move the
+whole folder, not the HTML alone: the two `.npy` arrays beside it hold the traces.
 
-* run `python -m http.server 8000` in that folder and open
-  `http://localhost:8000/VTYH01_PPC_20250212_1451ShortLong_interactive_fov_roi_dff.html`,
-  so the two arrays load automatically; or
-* double-click the HTML file and load the arrays by hand, as in the next step.
+#### Whether the arrays load automatically {#whether-the-sidecars-load-automatically}
+
+That depends on how the page is opened:
+
+| How you open the HTML | Address starts with | Arrays beside the HTML |
+|:---|:---|:---|
+| Through a web server, for example `python -m http.server 8000` run in the folder, then `http://localhost:8000/<name>_interactive_fov_roi_dff.html` | `http://` or `https://` | Load automatically |
+| By double-clicking it, or from any downloaded, copied or mounted folder | `file://` | Not loaded, because browsers do not let a page opened from disk read files beside it; select them with **Load dF/F** and **Load inferred spikes** (next step) |
+
+The dF/F panel's **(i)** popover says which case applies and whether each array loaded.
+Sessions small enough to embed their arrays have no separate files and open the same
+way from anywhere; `--force-embed true` makes any session self-contained
+([details](cli-mapping.md#embedded-or-separate-trace-arrays)).
 
 ### Load inputs by hand
 

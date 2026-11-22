@@ -49,19 +49,17 @@ For sessions above the embedding threshold the trace arrays are written beside t
 HTML as sidecars rather than embedded in it. The HTML and its sidecars must travel
 together. They load automatically when the page is opened through a web address, and
 are selected with **Load dF/F** and **Load inferred spikes** when it is opened from disk; see
-[Whether the sidecars load automatically](quickstart.md#whether-the-sidecars-load-automatically).
+[Whether the arrays load automatically](tutorial.md#whether-the-sidecars-load-automatically).
 
 ## Where to start
 
-* [Demo Sessions](demo-sessions.md#try-them-without-installing-anything) links two
-  example reviewers you can download and open in a browser right away.
-* [Quickstart](quickstart.md) installs the package and builds a reviewer.
 * [Tutorial](tutorial.md) goes from installation to reviewers built from every kind of
-  input, by hand and from one script.
+  input, by hand and from one script, and links two example reviewers you can open
+  without installing anything.
 * [Inputs, settings and helpers](reference.md) lists every input file, build setting and
   helper function on one page.
-* [Preparing Your Inputs](inputs.md) is the input contract, including the one
+* [Preparing Your Inputs](inputs.md) explains each input format, including the one
   correspondence no tool can check for you.
-* [Build Settings](cli-mapping.md) documents every configuration field and flag.
+* [Build Settings Explained](cli-mapping.md) covers the choices behind the settings.
 * [Interface Tour](interface.md) walks through the reviewer's panels, and the
   [Interface Reference](interface-reference.md) holds the full text behind each **(i)**.

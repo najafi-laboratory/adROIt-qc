@@ -67,7 +67,8 @@ at the low end events sit within the surrounding fluctuations, at the high end t
 unambiguous.
 
 The exemplars were drawn only from ROIs with 20–400 pixels, at most three connected
-components, and |dF/F| ≤ 20. In this session 332 of 2,702 ROIs exceed |dF/F| = 20,
+components, and |dF/F| ≤ 20. In this session (before its seven hand-drawn duplicate ROIs were removed) 332 of
+2,702 ROIs exceed |dF/F| = 20,
 values no calcium indicator produces, which arise when the baseline denominator
 approaches zero. Those ROIs take extreme values on several metrics at once, so they
 would have illustrated a division artifact rather than the metric. They are exactly the

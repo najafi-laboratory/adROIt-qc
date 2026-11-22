@@ -70,7 +70,7 @@ numeric metric. Helper: `write_metric_table`.
 The same setting has a configuration field (for `scripts/build_reviewer.py`), a command
 line flag (for `python -m adroit_qc.summary` or `adroit-qc`) and a Python keyword (for
 `adroit_qc.inputs.build_reviewer` or `adroit_qc.summary.create_processing_summary`).
-[Build settings](cli-mapping.md) explains each in full.
+[Build settings explained](cli-mapping.md) covers the choices behind them: input layouts, filter sets for masks from other software, embedding and page-only rebuilds.
 
 | Configuration field | Flag | Python keyword | Values |
 |:---|:---|:---|:---|

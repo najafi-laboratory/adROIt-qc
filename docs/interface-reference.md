@@ -101,7 +101,7 @@ Small sessions carry both arrays inside the HTML. Larger ones keep them beside i
 `SESSION_dff.npy` and `SESSION_inferred_spikes.npy` (see
 [Embedded or separate trace arrays](cli-mapping.md#embedded-or-separate-trace-arrays)).
 Opened through a web server they load automatically; opened from disk, choose them with
-**Load dF/F** and **Load inferred spikes** ([why](quickstart.md#open-the-result)). Show
+**Load dF/F** and **Load inferred spikes** ([why](tutorial.md#open-it)). Show
 Inferred Spikes and the threshold menu appear once spikes are loaded.
 
 Each file is a NumPy `.npy` array, one row per ROI in original-index order and one
@@ -184,7 +184,7 @@ A **filter set** is a named group of thresholds. Choosing one in **Filter set na
 fills in its values, and any field can then be changed; **Restore selected filter set**
 resets them. The built-in sets are `all_rois` (no thresholds), `soma`, `dendrite` and
 `dendrite_relaxed`; sets you save or import are marked "(saved)". A build can open on any
-of them with [`--filter-set` or `--filter-settings`](cli-mapping.md#every-setting).
+of them with [`--filter-set` or `--filter-settings`](reference.md#build-settings).
 
 ### Metric distributions
 

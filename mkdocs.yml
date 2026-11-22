@@ -22,10 +22,9 @@ extra_css:
 nav:
   - Overview: index.md
   - Getting Started:
-      - Quickstart: quickstart.md
       - Tutorial: tutorial.md
       - Preparing Your Inputs: inputs.md
-      - Build Settings: cli-mapping.md
+      - Build Settings Explained: cli-mapping.md
   - The Reviewer:
       - Interface Tour: interface.md
       - Interface Reference: interface-reference.md
@@ -33,4 +32,3 @@ nav:
       - Export and Downstream Use: export.md
   - Reference:
       - Inputs, Settings and Helpers: reference.md
-      - Demo Sessions: demo-sessions.md

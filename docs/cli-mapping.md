@@ -1,4 +1,4 @@
-# Build settings: configuration file and command line
+# Build settings explained
 
 A setting reaches the reviewer by one of three routes:
 
@@ -8,6 +8,9 @@ A setting reaches the reviewer by one of three routes:
    the configuration supply it.
 3. **A control in the open reviewer.** These act on the page in the browser; several
    have a build-time counterpart, listed [below](#controls-with-a-build-time-counterpart).
+
+This page explains the choices behind the settings; the settings themselves are listed
+in one table on [Inputs, settings and helpers](reference.md#build-settings).
 
 The first two routes are equivalent: a configuration file and the matching command
 produce byte-identical reviewer HTML. One session, one configuration file: copy
@@ -35,24 +38,8 @@ notes: ""
 
 ## Every setting
 
-| Configuration field | Generator flag | Effect |
-|:--|:--|:--|
-| `session_path` | positional argument | The directory read: a session root containing `suite2p/plane0/`, the plane directory itself, or a directory in the [documented layout](inputs.md#the-documented-layout) |
-| `output_dir` | `--output-dir` | Where the HTML, PDF and sidecar arrays are written |
-| `input_layout` | `--input-layout` | Which files supply masks and traces; see [Choosing an input layout](#choosing-an-input-layout) |
-| `roi_index_label` | `--roi-index-label` | Wording of the ROI index in the selected-ROI header, the labeler and the first sort key; presentation only |
-| `filter_set` | `--filter-set` | The filter set the **Filter set name** menu opens on: `all_rois`, `soma`, `dendrite` or `dendrite_relaxed`; see [Filter sets and masks from other software](#filter-sets-and-masks-from-other-software) |
-| `filter_settings` | `--filter-settings` | A [filter set JSON](interface-reference.md#saving-and-importing-filter-sets) whose thresholds and sort order the reviewer opens with |
-| `initialize_labels_from_model_scores` | `--initialize-labels-from-roi-model-scores` | Open with ROIs labeled from the [model scores](inputs.md#roi-model-scores) file instead of unlabeled |
-| `custom_roi_metrics` | `--custom-roi-metrics` (once per file) | Embed [your own metrics and categorical labels](inputs.md#uploaded-metrics-and-categorical-labels) |
-| `custom_roi_metric_sections` | `--custom-roi-metric-section NAME=SECTION` | Place an uploaded metric under another section of the Filter and Sort menus |
-| `force_embed` | `--force-embed true` / `false` | `true` always embeds dF/F and inferred spikes in the HTML; `false` always writes them as sidecar `.npy` files; omitted (`null`) decides by size |
-| `embed_limit_mb` | `--embed-limit-mb` | Size limit for automatic embedding, in MB of encoded data per array (default 80; must exceed 2) |
-| `title` | `--title` | Page title and heading; defaults to the session name |
-| `html_only` | `--html-only` | Rewrite only the page of an existing reviewer from its embedded data, in seconds; see [Rebuilding only the page](#rebuilding-only-the-page) |
-| `html_name`, `pdf_name` | `--html-name`, `--pdf-name` | Output filenames |
-| `archive_output`, `archive_name` | `--archive-output`, `--archive-name` | Write outputs into a per-session subfolder and zip it |
-| `name`, `notes` | none | Recorded in `run.json` only |
+The full table of configuration fields, flags and Python keywords is on
+[Inputs, settings and helpers](reference.md#build-settings).
 
 `--force-embed` also accepts `1`/`0` and `yes`/`no`, in any capitalization. The older
 field name `target_structure` is still accepted for `filter_set`.
@@ -90,7 +77,7 @@ By default dF/F and inferred spikes are embedded in the HTML when ROIs × frames
 most 15,335,424 (about 80 MB of encoded data per array), and otherwise written beside it
 as `SESSION_dff.npy` and `SESSION_inferred_spikes.npy`. Separate files load automatically
 only when the page is opened through a web server; see
-[Open the result](quickstart.md#open-the-result). `--embed-limit-mb 200` raises the
+[Open the result](tutorial.md#open-it). `--embed-limit-mb 200` raises the
 cutoff to 38,928,384; `--force-embed true` embeds regardless, with a warning above 512 MB
 per array, which browsers may not open.
 
