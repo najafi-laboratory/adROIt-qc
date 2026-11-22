@@ -256,7 +256,9 @@ event-triggered average. At least 3 frames above the threshold are needed.
 
 - **Inferred spike SNR:** (peak of *k* − mean of *k* before the event) ÷ SD of *k* before
   the event. The pre-event values of *k* should be near zero, so their spread measures
-  how noisy the estimate is; the SNR grows with the number of events.
+  how noisy the estimate is. For the same transient, more events give a less noisy
+  estimate and a higher SNR; threshold crossings caused by noise add events that carry no
+  transient and lower it.
 - **Rise tau:** time between the 10% and 90% crossings on the rising side of *k*, found
   backwards from the peak and interpolated between frames.
 - **Decay tau:** *k* from its peak is fitted with *b* + *A* exp(−*t*/τ), where *b* is the

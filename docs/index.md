@@ -1,5 +1,7 @@
 # adROIt-qc
 
+*adroit (adjective), /əˈdrɔɪt/, "uh-DROYT": skillful and quick, especially when handling something difficult.*
+
 This repository builds an interactive, self-contained reviewer for region-of-interest
 quality control in two-photon calcium imaging. You point it at a processed session and
 it writes a single HTML file that embeds the field-of-view images, the per-ROI masks,

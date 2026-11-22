@@ -1,5 +1,7 @@
 # adROIt-qc
 
+*adroit (adjective), /əˈdrɔɪt/, "uh-DROYT": skillful and quick, especially when handling something difficult.*
+
 adROIt-qc builds interactive, self-contained ROI quality-control
 reviewers from two-photon calcium imaging sessions, whatever software produced
 the segmentation.

@@ -35,7 +35,7 @@ see [Morphology metrics](interface-reference.md#morphology-metrics) and
 | SNR: 95/50 percentile | `snr_95_50` | Robust transient amplitude (95th − 50th percentile of dF/F) ÷ residual noise | Higher = stronger transients relative to noise |
 | SNR: CaImAn (large-transient score) | `caiman_exceptional_event_snr` | Exceptional-event score after CaImAn | Higher = stronger large transients |
 | **Inferred spikes** | | | |
-| Inferred spike SNR | `inferred_spike_snr` | Peak of the ROI's regression-estimated transient minus its pre-event mean, ÷ SD of its pre-event values; grows with event count ([definition](interface-reference.md#inferred-spike-metrics)) | Higher = events stand out from baseline |
+| Inferred spike SNR | `inferred_spike_snr` | Peak of the ROI's regression-estimated transient minus its pre-event mean, ÷ SD of its pre-event values; for a given ROI more events make the estimate less noisy, but threshold crossings caused by noise lower it ([definition](interface-reference.md#inferred-spike-metrics)) | Higher = events stand out from baseline |
 | Inferred spike rise tau | `inferred_spike_rise_tau_seconds` | Time between the 10% and 90% crossings of the regression-estimated transient | n/a |
 | Inferred spike decay tau | `inferred_spike_decay_tau_seconds` | Time constant of an exponential fitted to the regression-estimated transient from its peak | n/a |
 
