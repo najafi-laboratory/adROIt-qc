@@ -56,12 +56,12 @@ are selected with **Load dF/F** and **Load inferred spikes** when it is opened f
 ## Where to start
 
 * [Tutorial](tutorial.md) goes from installation to reviewers built from every kind of
-  input, by hand and from one script, and links two example reviewers you can open
-  without installing anything.
-* [Inputs, settings and helpers](reference.md) lists every input file, build setting and
-  helper function on one page.
-* [Preparing Your Inputs](inputs.md) explains each input format, including the one
-  correspondence no tool can check for you.
+  input: by hand, from your own software's output, and from one script. It links two
+  example reviewers you can open without installing anything.
+* [Interface Reference](interface-reference.md) shows each panel of the reviewer with the
+  full text behind its **(i)** icon.
+* [Metric Definitions](metrics.md) gives each metric's equation and the code that computes it.
+* [Input Formats](inputs.md) is the reference for every input file.
+* [Programmatic Reference](reference.md) lists every build setting, Python helper and
+  command-line tool.
 * [Build Settings Explained](cli-mapping.md) covers the choices behind the settings.
-* [Interface Tour](interface.md) walks through the reviewer's panels, and the
-  [Interface Reference](interface-reference.md) holds the full text behind each **(i)**.

@@ -15,20 +15,26 @@ markdown_extensions:
   - admonition
   - toc:
       permalink: true
+  # Equations on the Metric Definitions page: $...$ and $$...$$ rendered by MathJax.
+  - pymdownx.arithmatex:
+      generic: true
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 nav:
   - Overview: index.md
   - Getting Started:
       - Tutorial: tutorial.md
-      - Preparing Your Inputs: inputs.md
       - Build Settings Explained: cli-mapping.md
   - The Reviewer:
-      - Interface Tour: interface.md
       - Interface Reference: interface-reference.md
-      - Metric Reference: metrics.md
+      - Metric Definitions: metrics.md
       - Export and Downstream Use: export.md
   - Reference:
-      - Inputs, Settings and Helpers: reference.md
+      - Input Formats: inputs.md
+      - Programmatic Reference: reference.md

@@ -10,7 +10,7 @@ A setting reaches the reviewer by one of three routes:
    have a build-time counterpart, listed [below](#controls-with-a-build-time-counterpart).
 
 This page explains the choices behind the settings; the settings themselves are listed
-in one table on [Inputs, settings and helpers](reference.md#build-settings).
+in one table on [Programmatic reference](reference.md#build-settings).
 
 The first two routes are equivalent: a configuration file and the matching command
 produce byte-identical reviewer HTML. One session, one configuration file: copy
@@ -39,7 +39,7 @@ notes: ""
 ## Every setting
 
 The full table of configuration fields, flags and Python keywords is on
-[Inputs, settings and helpers](reference.md#build-settings).
+[Programmatic reference](reference.md#build-settings).
 
 `--force-embed` also accepts `1`/`0` and `yes`/`no`, in any capitalization. The older
 field name `target_structure` is still accepted for `filter_set`.
@@ -100,7 +100,7 @@ place.
 
 Inputs that need no setting at all, such as `spikes.h5`, mean images, motion offsets,
 cell type labels and model scores, are found in the session directory automatically;
-[Preparing your inputs](inputs.md) lists them.
+[Input formats](inputs.md) lists them.
 
 **A build-time metric and a browser upload differ in what persists.** A build-time metric
 is part of the file for everyone who opens it. A browser upload exists in the open page

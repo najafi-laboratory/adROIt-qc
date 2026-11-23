@@ -19,9 +19,9 @@ script that records how each output was produced.
 
 The full documentation is in `docs/` and is published as a site at
 <https://najafi-laboratory.github.io/adROIt-qc/>: a tutorial from installation to
-reviewers built from every kind of input, a one-page list of every input file, build
-setting and helper function, the input formats in full, a tour and a reference for the
-reviewer interface, the metric definitions, and the export formats. To read it locally:
+reviewers built from every kind of input, an illustrated reference for the reviewer
+interface, metric definitions with their equations, the input formats, a programmatic
+reference for every build setting and helper, and the export formats. To read it locally:
 
 ```bash
 pip install -r requirements-docs.txt

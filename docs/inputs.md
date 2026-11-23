@@ -1,24 +1,63 @@
-# Preparing your inputs
+# Input formats
 
-The reviewer needs two things, where each ROI is and what its fluorescence did over
-time, and can use more: inferred spikes from any method, mean images, motion offsets,
-classifier scores and your own per-ROI metrics and labels. This page explains each
-input format in full; [Inputs, settings and helpers](reference.md) lists them all on
-one page.
+This page is the reference for every file the generator reads: its name, shape, container
+and the helper that writes it. The [Tutorial](tutorial.md#part-3-preparing-your-own-inputs)
+walks through preparing a session from your own software, and the
+[Programmatic reference](reference.md) lists the build settings and helper functions.
+
+A session directory is read in one of two layouts. In both, row *i* of every per-ROI
+file is ROI *i*, the ROI's 0-based **original index**. Shapes use `n_rois` (ROIs),
+`n_frames` (frames) and `(Ly, Lx)` (image height and width in pixels).
+
+## The Suite2p layout
+
+Read with `input_layout: suite2p`.
+
+| File | Required | Format |
+|:---|:---|:---|
+| `suite2p/plane0/stat.npy` | yes | Suite2p ROI statistics (pixels, weights, shape statistics) |
+| `suite2p/plane0/F.npy`, `Fneu.npy` | yes; `Fneu` optional | `(n_rois, n_frames)` raw and neuropil fluorescence |
+| `suite2p/plane0/ops.npy` | yes | frame rate `fs`, `neucoeff`, mean images `meanImg` / `meanImg_chan2`, `max_proj`, `xoff` / `yoff`, `diameter` |
+| `suite2p/plane0/iscell.npy` | no | `(n_rois, 2)` Suite2p accept/reject and probability; shown, never filters |
+| Every optional file of the [documented layout](#the-documented-layout) except the masks, traces and metadata | no | placed at the session root |
 
 ## The documented layout
 
-`adroit_qc.inputs` writes each of these files from Python arrays
-([helpers](reference.md#helper-functions)), `scripts/make_standard_inputs.py` writes a
-directory in this form from array files, and `scripts/validate_inputs.py` (or
-`python -m adroit_qc.validate`) checks one against it.
+Read with `input_layout: external_rois`, for masks from any software.
+`adroit_qc.inputs` writes each file from Python arrays ([helpers](reference.md#helper-functions)),
+`scripts/make_standard_inputs.py` writes a directory in this form from array files, and
+`python -m adroit_qc.validate` checks one against it.
 
-Every file in the layout, with its shape and the helper that writes it, is listed in
-[Inputs, settings and helpers](reference.md#input-files). The sections below explain
-the formats that need more than a line.
+| File | Required | Format | Helper |
+|:---|:---|:---|:---|
+| `roi_mask.npy` | one of these two | `(Ly, Lx)` integer label image, 0 = background; sorted positive labels are rows 0, 1, … ([details](#dense-label-masks)) | `write_label_mask` |
+| `spatial_components.npz` | | SciPy sparse `(Ly·Lx, n_rois)` pixel weights, column *k* = ROI *k* ([details](#overlapping-rois)) | `write_spatial_components` |
+| `F.npy` | yes | `(n_rois, n_frames)` float32 raw fluorescence | `write_traces` |
+| `Fneu.npy` | no | same shape, neuropil; without it nothing is subtracted | `write_traces` |
+| `dff.h5`, dataset `dff` | no | same shape; displayed and measured as given instead of dF/F computed from `F.npy` | `write_dff` |
+| `spikes.h5`, dataset `spikes` | no | same shape; inferred spikes from any method in their own units; attribute `event_threshold` sets the opening threshold | `write_spikes` |
+| `mean_func.npy`, `mean_anat.npy`, `max_func.npy`, `max_anat.npy` | no | `(Ly, Lx)` images ([details](#mean-images)) | `write_images` |
+| `move_offset.h5`, datasets `xoff`, `yoff` | no | `(n_frames,)` rigid shift per frame in pixels ([details](#motion-offsets)) | `write_motion_offsets` |
+| `roi_cell_type_labels.npy` | no | `(n_rois,)` float: 1 inhibitory, −1 excitatory, 0 unsure, NaN unknown | `write_cell_types` |
+| `iscell.npy` | no | `(n_rois, 2)` upstream accept (1) / reject (0) and probability | `write_iscell` |
+| `roi_model_scores.h5` | no | classifier output, below | `write_classifier_scores` |
+| `external_roi_metadata.json` | needed for sparse masks without an image | below | `write_metadata` |
+
+**`external_roi_metadata.json` fields.** `image_shape` `[Ly, Lx]`; `flatten_order` `"F"`
+(column-major, CaImAn) or `"C"`; `frame_rate` in Hz (default 30); `diameter`, expected ROI
+diameter in pixels, one number or `[dy, dx]`; `neuropil_coefficient` (default 0.7).
+
+**`roi_model_scores.h5`, from any classifier** ([details](#roi-model-scores)).
+Dataset `classifier_score` (or `probability`), 0–1 per ROI, higher = more likely good;
+`state` per ROI, `good`, `bad` or `gray`; optional `roi` (or `suite2p_roi`) original
+index per row. Attributes `good_threshold`, `bad_threshold`, `model_source`,
+`target_structure`. The reviewer also reads `roi_qc_predictions.h5` and
+`roi_predictions.h5` under the same names.
 
 Sparse component matrices from CaImAn-style pipelines are accepted directly; supply
 `flatten_order: "F"` in the metadata file unless your pixel indices are row-major.
+
+## dF/F and inferred spikes
 
 !!! danger "HDF5 for dF/F and spikes, not .npy"
     The generator reads dF/F and inferred spikes **only** from HDF5, at the dataset
@@ -51,6 +90,9 @@ compute dF/F from their own traces.
 Inferred spikes have no such fallback: without `spikes.h5`, the spike overlay and
 every inferred-spike metric are unavailable, and the reviewer says so rather than
 showing an empty panel.
+
+The opening [spike threshold](interface-reference.md#inferred-spike-threshold) can be set
+with the `event_threshold` attribute of `spikes.h5` (helper: `write_spikes(..., event_threshold=)`).
 
 ## Dense label masks
 
@@ -106,7 +148,7 @@ metric reports how many patches there are.
 | The number of labels equals the number of trace rows | validator, as an error |
 | Labels run `1..N` without gaps | validator, as a warning (gaps are legal, but are the usual sign of a row-order mismatch) |
 | The mask has the same shape as the mean image | not checked: a mismatch draws outlines in the wrong place |
-| Label *k* really belongs to the trace in its row | not checkable; see [below](#the-one-thing-no-tool-can-check) |
+| Label *k* really belongs to the trace in its row | not checkable; see [below](tutorial.md#the-one-thing-no-tool-can-check) |
 
 If the counts disagree and validation is skipped, the generator uses only as many ROIs
 as both the mask and the traces have, without warning.
@@ -234,7 +276,7 @@ with h5py.File("move_offset.h5", "w") as handle:
 ```
 
 CaImAn's `shifts_rig` is an `(n_frames, 2)` array of `(y, x)` shifts; the
-[CaImAn converter](#converting-from-caiman) writes it in this form.
+[CaImAn converter](tutorial.md#converting-from-caiman) writes it in this form.
 
 ## Uploaded metrics and categorical labels
 
@@ -322,100 +364,11 @@ The states
 (`model_QC_label`) label ROIs only when the build sets
 `initialize_labels_from_model_scores: true`.
 
-## Converting from another pipeline
+## Files the open reviewer loads
 
-```bash
-python scripts/make_standard_inputs.py \
-    --masks  segmentation/cell_masks.npy \
-    --traces segmentation/traces.npy \
-    --out    data/my_session
-```
 
-| Option | Use |
-|---|---|
-| `--masks` | dense 2-D integer label image (`.npy`, `.npz`, `.csv`) |
-| `--traces` | raw fluorescence, ROIs by frames or frames by ROIs |
-| `--neuropil` | optional neuropil traces, same shape as `--traces` |
-| `--spikes` | optional inferred spike amplitudes, same shape as `--traces` |
-| `--dff` | optional precomputed dF/F; omit to let the generator compute it |
-| `--fov` | optional functional mean image |
-| `--cell-types` | optional per-ROI cell type codes |
-| `--row-order` | the mask label belonging to each trace row, in row order |
-| `--out` | output directory |
-
-The converter transposes a frames-by-ROIs trace matrix, compacts mask labels that are
-not a gap-free run from 1, and writes dF/F and spikes as HDF5.
-
-## Converting from CaImAn
-
-`examples/caiman/` holds a worked CaImAn path, run on the posterior parietal cortex
-demo session.
-
-!!! note "An example of adapting another workflow, not a recommended CaImAn analysis"
-    This example shows how the output, file formats and quality metrics of a different
-    tool can be mapped onto the reviewer's inputs. It is not a comprehensive or optimized
-    CaImAn session: it processes only the first four files (16,356 frames) with
-    near-default parameters, no parameter tuning and no neuropil estimate, and its
-    component counts say nothing about CaImAn's performance. Tune CaImAn for your own
-    data as its documentation describes, then use the same conversion.
-
-The two scripts:
-
-* `run_caiman.py` reads raw Bruker OME-TIFFs for one channel, runs CaImAn rigid motion
-  correction and CNMF, evaluates the components, and saves the result with
-  `cnm.save(...)`, the motion-corrected memmap and the rigid shifts;
-* `caiman_to_reviewer.py` converts that result into this layout without importing
-  CaImAn.
-
-```bash
-python examples/caiman/run_caiman.py --tiff-dir raw/SESSION --channel Ch2 \
-    --n-files 4 --frame-rate 30 --out caiman_out
-python examples/caiman/caiman_to_reviewer.py --cnmf caiman_out/cnmf_results.hdf5 \
-    --movie caiman_out/memmap_*order_C_frames_*.mmap --shifts caiman_out/rigid_shifts.npy \
-    --frame-rate 30 --out data/SESSION_caiman
-python scripts/validate_inputs.py data/SESSION_caiman
-python -m adroit_qc.summary data/SESSION_caiman --input-layout external_rois \
-    --custom-roi-metrics data/SESSION_caiman/caiman_metrics.csv
-```
-
-| CaImAn output | Written as | Notes |
-|:---|:---|:---|
-| `estimates.A` | `spatial_components.npz` | unchanged; pixel order F, recorded in `external_roi_metadata.json` |
-| motion-corrected movie | `F.npy` | footprint-weighted mean of the movie per component, so dF/F is computed as for Suite2p's `F.npy` |
-| `estimates.S` | `spikes.h5` | deconvolved activity; set the [spike threshold](interface-reference.md#inferred-spike-threshold) in its units |
-| mean of the movie, correlation image | `mean_func.npy`, `max_func.npy` | |
-| `shifts_rig` | `move_offset.h5` | `xoff`, `yoff` in pixels |
-| `idx_components`, `SNR_comp`, `r_values` | `iscell.npy`, `caiman_metrics.csv` | rejected components are kept and marked, so they can be reviewed rather than dropped |
-
-Component *k* becomes reviewer ROI *k*, so `roi_index` *k* in every export refers back to
-CaImAn component *k*. `caiman_metrics.csv` adds `caiman_snr`, `caiman_r_value` and the
-categorical `caiman_status` (accepted or rejected) as uploaded metrics.
-
-The same pattern applies to any other tool: write its masks and traces in the layout
-above, and put whatever per-ROI quality measures or decisions it produces into an
-uploaded metric file, numeric columns for scores and `NAME_code` columns for categorical
-decisions, so they can be filtered, sorted and exported alongside the reviewer's own
-metrics.
-
-## Validate before you build
-
-```bash
-python scripts/validate_inputs.py data/my_session
-```
-
-It reports shape disagreements, a mask label count that does not match the trace row
-count, arrays that are not C-ordered, a stray `.npy` where HDF5 is expected, and files
-it cannot read at all. It exits non-zero when it finds an error, so it can gate a
-pipeline step. `build_reviewer.py` runs the same checks unless you pass
-`--skip-validation`.
-
-## The one thing no tool can check
-
-Whether mask label *k* really belongs to trace row *k−1*.
-
-A mismatch produces a reviewer in which every mask is paired with the wrong trace.
-Every array has the right shape, every check passes, and nothing in the interface
-flags it. Pass `--row-order` if your segmentation numbers masks and traces
-differently, and spot-check one known-active ROI before trusting a session: select it
-in the field of view and confirm the trace panel shows the activity you expect in the
-place you expect it.
+| Control | File |
+|:---|:---|
+| **Load dF/F**, **Load inferred spikes** | `(n_rois, n_frames)` float32 `.npy` ([format](interface-reference.md#loading-dff-and-inferred-spike-files)) |
+| **Upload Custom ROI Metrics/Cell Identity Labels** | the [per-ROI table](#uploaded-metrics-and-categorical-labels) |
+| **Import filter set JSON** | a file from **Export current filter/sorting settings JSON** |
